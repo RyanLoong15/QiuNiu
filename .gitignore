@@ -1,0 +1,45 @@
+# 编译输出
+target/
+*.class
+*.jar
+*.war
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+*.egg-info/
+
+# 数据库
+*.sql.bak
+
+# 日志
+*.log
+
+# 临时文件
+*.tmp
+*.temp
+*.bak
+*.bak_*
+
+# 上传文件
+bank_kb/uploads/
+
+# 敏感配置（如果有）
+*.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db

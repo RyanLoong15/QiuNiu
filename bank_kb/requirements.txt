@@ -1,0 +1,11 @@
+flask>=3.0.0
+jieba>=0.42.1
+rank-bm25>=0.2.0
+numpy>=1.24.0
+requests>=2.31.0
+mysql-connector-python>=8.0.0
+
+# Milvus vector search
+pymilvus>=2.4.0
+sentence-transformers>=2.7.0
+torch>=2.0.0
