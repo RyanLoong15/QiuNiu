@@ -98,11 +98,15 @@ class HybridRetriever:
         if top_k is None:
             top_k = TOP_K
         if self.doc_count == 0:
+            print("[Retriever.retrieve] doc_count=0, returning empty")
             return []
 
         q_tokens = self.tokenize(query)
         if not q_tokens:
+            print(f"[Retriever.retrieve] q_tokens is empty for query='{query}', returning empty")
             return []
+
+        print(f"[Retriever.retrieve] query='{query}', q_tokens={q_tokens}, doc_count={self.doc_count}")
 
         # BM25 scores
         bm25_scores = self._bm25_scores(q_tokens, doc_tokens=[

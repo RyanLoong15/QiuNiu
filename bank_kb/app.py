@@ -10,7 +10,7 @@ Provides RAG-based knowledge Q&A with virtual human persona.
 
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-import atexit, threading, time, os, hashlib, functools
+import atexit, threading, time, os, hashlib, functools, traceback
 from werkzeug.utils import secure_filename
 import jwt as jwt_lib
 from datetime import datetime, timedelta
@@ -304,6 +304,56 @@ def status():
 def health():
     """Simple liveness probe."""
     return jsonify({"status": "ok"})
+
+
+@app.route("/api/health", methods=["GET"])
+def api_health():
+    """Health check endpoint (alias for /health)."""
+    return health()
+
+
+@app.route("/api/stats", methods=["GET"])
+def api_stats():
+    """Stats endpoint (alias for /status)."""
+    return status()
+
+
+@app.route("/debug/retrieve", methods=["POST"])
+def debug_retrieve():
+    """
+    Debug endpoint: call BM25 retriever directly.
+    Request: {"query": "...", "top_k": 5}
+    Response: {"bm25_results": [...], "entries_count": N}
+    """
+    body = request.get_json(force=True) or {}
+    q = (body.get("query") or "").strip()
+    top_k = int(body.get("top_k", TOP_K))
+    
+    if not q:
+        return jsonify({"error": "query is required"}), 400
+    
+    try:
+        # Call BM25 retriever directly
+        raw_results = engine.bm25_retriever.retrieve(q, top_k=top_k)
+        
+        # Also test vector retriever if available
+        vector_results = []
+        if engine._check_vector_available():
+            try:
+                vector_results = engine.vector_retriever.retrieve(q, top_k=top_k)
+            except Exception as e:
+                print(f"[Debug] Vector retrieve error: {e}")
+        
+        return jsonify({
+            "query": q,
+            "bm25_results": raw_results[:top_k],
+            "bm25_count": len(raw_results),
+            "vector_results_count": len(vector_results),
+            "entries_count": len(engine._entries_cache),
+            "indexed_count": engine.bm25_retriever.doc_count,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
 
 
 @app.route("/ingest", methods=["POST"])

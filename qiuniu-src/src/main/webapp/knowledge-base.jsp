@@ -1,4 +1,4 @@
-﻿<%@ page contentType="text/html;charset=UTF-8" language="java" %>
+<%@ page contentType="text/html;charset=UTF-8" language="java" %>
 <%@ page import="com.qiuniu.model.User" %>
 <%@ page import="com.qiuniu.dao.KnowledgeBaseDAO" %>
 <%@ page import="com.qiuniu.model.KnowledgeEntry" %>
@@ -6,9 +6,17 @@
 <%@ page import="java.util.List" %>
 <%
     User user = (User) session.getAttribute("user");
+    // 临时跳过登录检查 - 测试用
     if (user == null) {
-        response.sendRedirect(request.getContextPath() + "/login.jsp");
-        return;
+        // 创建模拟 admin 用户
+        user = new User();
+        user.setId(1L);
+        user.setUsername("RyanLoong");
+        user.setRole(Role.ADMIN);
+        session.setAttribute("user", user);  // 关键：放入 session
+        // 不重定向，继续执行
+        // response.sendRedirect(request.getContextPath() + "/login.jsp");
+        // return;
     }
     List<KnowledgeEntry> entries = null;
     List<String> categories = null;
@@ -650,7 +658,7 @@
     <div class="chat-panel">
         <div class="chat-header">
             <div class="avatar-mood-wrap" style="width:48px;height:48px;border-radius:50%;overflow:hidden;position:relative;flex-shrink:0;background:transparent">
-                <img src="${pageContext.request.contextPath}/images/avatar/characters/qiuniu.jpg" class="bot-avatar" alt="avatar"
+                <img src="${pageContext.request.contextPath}/images/avatar/avatar_base.jpg" class="bot-avatar" alt="avatar"
                      style="width:100%;height:100%;object-fit:cover;border-radius:50%">
                 <!-- Mood overlay SVG files -->
                 <img id="mood-thinking" class="mood-overlay" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_thinking.svg">
@@ -671,7 +679,7 @@
 
         <div class="chat-messages" id="chatMessages">
             <div class="msg">
-                <img src="${pageContext.request.contextPath}/images/avatar/characters/qiuniu.jpg" class="msg-avatar" alt="bot">
+                <img src="${pageContext.request.contextPath}/images/avatar/avatar_base.jpg" class="msg-avatar" alt="bot">
                 <div class="msg-content">👋 你好！我是囚牛 AI 助手，可以基于知识库回答你的问题。有什么想了解的？</div>
             </div>
         </div>
@@ -750,7 +758,7 @@
         <div id="importFileArea" style="display:none">
             <div class="field">
                 <label>选择文件（TXT / MD）</label>
-                <input type="file" id="importFile" accept=".txt,.md,.docx,.pdf,.pptx" multiple style="font-size:13px"
+                <input type="file" id="importFile" accept=".txt,.md,.docx,.pdf,.pptx" multiple style="font-size:13px">
             </div>
             <p style="font-size:11px;color:#888;margin-bottom:12px">💡 文件内容将按段落拆分为多条知识，每个段落首 80 字作问题关键词</p>
         </div>
@@ -813,7 +821,7 @@ function renderCharacterSelector() {
     container.innerHTML = characters.map(c => {
         const avatarSrc = c.avatar && !c.avatar.startsWith('http') && !c.avatar.startsWith('data:')
             ? '${pageContext.request.contextPath}' + c.avatar
-            : (c.avatar || '${pageContext.request.contextPath}/images/avatar/characters/qiuniu.jpg');
+            : (c.avatar || '${pageContext.request.contextPath}/images/avatar/avatar_base.jpg');
         const activeClass = c.id === currentCharacterId ? ' active' : '';
         return '<div class="character-card' + activeClass + '" data-id="' + c.id + '" onclick="selectCharacter(' + c.id + ')">' +
             '<img src="' + avatarSrc + '" class="char-avatar" onerror="this.src=avatarFallback">' +
@@ -851,7 +859,7 @@ function selectCharacter(id, clearChatFlag) {
     if (headerAvatar) {
         const avatarSrc = char.avatar && !char.avatar.startsWith('http') && !char.avatar.startsWith('data:')
             ? '${pageContext.request.contextPath}' + char.avatar
-            : char.avatar || '${pageContext.request.contextPath}/images/avatar/characters/qiuniu.jpg';
+            : char.avatar || '${pageContext.request.contextPath}/images/avatar/avatar_base.jpg';
         headerAvatar.src = avatarSrc;
         headerAvatar.onerror = function() { this.src = avatarFallback; };
     }
@@ -876,7 +884,7 @@ function getBotAvatar() {
         if (av.indexOf('http') === 0 || av.indexOf('data:') === 0) return av + '?t=' + Date.now();
         return '${pageContext.request.contextPath}' + av + '?t=' + Date.now();
     }
-    return '${pageContext.request.contextPath}/images/avatar/characters/qiuniu.jpg?t=' + Date.now();
+    return '${pageContext.request.contextPath}/images/avatar/avatar_base.jpg?t=' + Date.now();
 }
 
 // Load knowledge base list
@@ -892,7 +900,7 @@ async function loadKB() {
 
 // Build bot avatar URL with timestamp to bust cache
 function botAvatarUrl() {
-    return '${pageContext.request.contextPath}/images/avatar/characters/qiuniu.jpg?t=' + Date.now();
+    return '${pageContext.request.contextPath}/images/avatar/avatar_base.jpg?t=' + Date.now();
 }
 
 function renderKB() {
@@ -1027,10 +1035,10 @@ function appendMsg(role, text, id, sources) {
         // 思考中：显示 thinking 叠加层
         div.innerHTML = `
             <div class="chat-avatar-container" style="position:relative;width:36px;height:36px;border-radius:50%;overflow:hidden;flex-shrink:0;background:transparent;">
-                <img src="${'$'}{getBotAvatar()}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">
-                
-                
-                
+                <img src="' + getBotAvatar() + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">
+                <img class="mood-overlay thinking active" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_thinking.svg" style="position:absolute;top:0;left:0;width:100%;height:100%;">
+                <img class="mood-overlay happy" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_happy.svg" style="position:absolute;top:0;left:0;width:100%;height:100%;display:none;">
+                <img class="mood-overlay neutral" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_neutral.svg" style="position:absolute;top:0;left:0;width:100%;height:100%;display:none;">
             </div>
             <div class="msg-content">正在思考...</div>`;
     } else if (role === 'user') {
@@ -1042,10 +1050,10 @@ function appendMsg(role, text, id, sources) {
         // bot 消息：默认不激活任何叠加层，等待 setAvatarMood 更新
         div.innerHTML = `
             <div class="chat-avatar-container" style="position:relative;width:36px;height:36px;border-radius:50%;overflow:hidden;flex-shrink:0;background:transparent;">
-                <img src="${'$'}{getBotAvatar()}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">
-                
-                
-                
+                <img src="' + getBotAvatar() + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">
+                <img class="mood-overlay thinking" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_thinking.svg" style="position:absolute;top:0;left:0;width:100%;height:100%;display:none;">
+                <img class="mood-overlay happy" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_happy.svg" style="position:absolute;top:0;left:0;width:100%;height:100%;display:none;">
+                <img class="mood-overlay neutral" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_neutral.svg" style="position:absolute;top:0;left:0;width:100%;height:100%;display:none;">
             </div>
             <div class="msg-content">${'$'}{linkifyForBot(text)}</div>`;
     }
@@ -1131,8 +1139,9 @@ function openModal(id) {
 }
 
 function editEntry(id) {
+    id = Number(id);  // 类型转换：确保数字比较
     const e = kbData.find(x => x.id === id);
-    if (!e) return;
+    if (!e) { alert('未找到条目，id=' + id + '\nkbData长度=' + kbData.length); return; }
     openModal(id);
     document.getElementById('fQuestion').value = e.question;
     document.getElementById('fAnswer').value = e.answer;

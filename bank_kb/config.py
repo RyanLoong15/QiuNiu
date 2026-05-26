@@ -81,7 +81,8 @@ RERANK_TOP_K = 5       # RRF 融合后返回数
 RRF_K = 60             # RRF 融合参数
 
 # 相似度阈值
-SIMILARITY_THRESHOLD = 0.25
+# RRF 分数通常很低（0.01~0.03），设为 0 不过滤
+SIMILARITY_THRESHOLD = 0.0
 
 # 混合检索权重
 VECTOR_WEIGHT = 0.5
