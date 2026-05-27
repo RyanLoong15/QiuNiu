@@ -111,7 +111,7 @@ class Generator:
                 parts = []
                 for i, r in enumerate(retrieved_entries[:3], 1):
                     e = r["entry"]
-                    parts.append(f"{i}. {e.get('answer', '')}")
+                    parts.append(f"相关知识点{i}：{e.get('answer', '')}")
                 answer = "\n\n".join(parts)
                 mode = "fallback_retrieval"
             model = "direct-retrieval"
@@ -146,7 +146,7 @@ class Generator:
                 if len(answer_text) > CHUNK_SIZE:
                     answer_text = answer_text[:CHUNK_SIZE] + "..."
                 lines.append(
-                    f"[{i}] 类别：{e.get('category', '未分类')}\n"
+                    f"[知识点{i}] 类别：{e.get('category', '未分类')}\n"
                     f"    问题：{e.get('question', '')}\n"
                     f"    答案：{answer_text}"
                 )
