@@ -56,8 +56,8 @@
             flex-shrink: 0;
             box-shadow: 0 2px 12px rgba(0,0,0,0.15);
         }
-        .header h1 { font-size: 20px; }
-        .header .right { display: flex; align-items: center; gap: 12px; }
+        .header h1 { font-size: 20px; white-space: nowrap; }
+        .header .right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; white-space: nowrap; }
         .header a { color: rgba(255,255,255,0.85); text-decoration: none; font-size: 14px; }
         .header a:hover { color: white; }
         .header .divider { opacity: 0.4; }
@@ -196,10 +196,18 @@
             padding: 14px 18px;
             border-bottom: 1px solid #e8ecf4;
             display: flex;
-            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            min-height: 48px;
+        }
+        .kb-header h2 { font-size: 15px; color: #333; white-space: nowrap; flex-shrink: 0; }
+        .kb-header .btn-add { flex-shrink: 0; }
+        .kb-header-actions {
+            margin-left: auto;
+            display: flex;
+            gap: 8px;
             align-items: center;
         }
-        .kb-header h2 { font-size: 15px; color: #333; }
         .btn-add {
             background: linear-gradient(135deg, #667eea, #764ba2);
             color: white;
@@ -711,10 +719,10 @@
     <div class="kb-panel">
         <div class="kb-header">
             <h2>📖 知识库条目</h2>
-            <div>
+            <div class="kb-header-actions">
                 <% if (canWrite) { %>
-                <button class="btn-add" style="margin-right:8px" onclick="openImportModal()">📂 导入</button>
-                <button class="btn-add" style="margin-right:8px" onclick="openDocImportModal()">📄 文档导入</button>
+                <button class="btn-add" onclick="openImportModal()">📂 导入</button>
+                <button class="btn-add" onclick="openDocImportModal()">📄 文档导入</button>
                 <button class="btn-add" onclick="openModal()">+ 新增</button>
                 <% } %>
             </div>

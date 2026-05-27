@@ -1,15 +1,25 @@
-﻿# 🦞 囚牛 (QiuNiu) - 提示词管理系统
+# 🐲 囚牛 (QiuNiu) - 智能知识库与提示词管理系统
 
-基于 Tomcat 的 Java Web 应用，用于管理和维护大模型提示词。
+基于 Tomcat + Flask 的双引擎 Web 应用，集成多角色 AI 问答、知识库 RAG 检索、员工门户和提示词管理。
+
+---
 
 ## 功能特性
 
-- ✅ 用户注册与登录（密码加密存储）
-- ✅ 提示词 CRUD 管理（新增、修改、删除、查询）
-- ✅ 提示词分类管理
-- ✅ 关键词搜索
-- ✅ MySQL 数据库存储
-- ✅ 响应式界面设计
+### 核心功能
+- ✅ **双登录体系**：管理员登录（提示词系统）+ 员工工号登录（员工门户）
+- ✅ **多角色 AI 问答**：支持多个虚拟角色（不同人设/系统提示词）并行对话
+- ✅ **知识库 RAG 检索**：BM25 + 向量混合检索，基于知识库内容回答
+- ✅ **知识库管理**：手动录入、文档导入（Word/PDF/TXT）、启用/禁用
+- ✅ **员工门户**：员工登录查看待回答问题、回答后自动录入知识库
+- ✅ **向本人提问**：用户可标记「不满意 AI 回答」，问题自动推送给关联员工
+- ✅ **头像上传**：员工/角色支持上传头像，替代 AI 生成头像
+- ✅ **Git 版本对比**：批量对比多仓库分支差异（需配置 Git 环境）
+
+### 提示词管理（原有）
+- ✅ 用户注册与登录（BCrypt 密码加密）
+- ✅ 提示词 CRUD（分类、搜索、筛选）
+- ✅ MySQL 持久化存储
 
 ---
 
@@ -17,61 +27,103 @@
 
 ```
 QiuNiu/
-├── src/main/
-│   ├── java/com/qiuniu/
-│   │   ├── dao/           # 数据访问层
-│   │   ├── model/         # 数据模型
-│   │   ├── servlet/       # Servlet 控制器
-│   │   ├── filter/        # 过滤器
-│   │   └── listener/      # 监听器
-│   ├── resources/
-│   │   └── db.properties  # 【配置文件】数据库连接配置
-│   └── webapp/
-│       ├── WEB-INF/
-│       │   └── web.xml    # Web 应用配置
-│       ├── images/        # 图片资源
-│       ├── css/           # 样式文件
-│       ├── js/            # JavaScript 文件
-│       ├── login.jsp      # 登录页面
-│       ├── register.jsp   # 注册页面
-│       └── dashboard.jsp  # 控制台页面
-├── pom.xml                # Maven 配置
-└── README.md              # 本文件
+├── qiuniu-src/                    # Tomcat 主应用（Java/JSP）
+│   ├── pom.xml                   # Maven 构建配置
+│   ├── deploy.bat                # Windows 一键部署脚本
+│   ├── init-db.sql              # 数据库初始化脚本（15 张表）
+│   ├── src/main/
+│   │   ├── java/com/qiuniu/
+│   │   │   ├── dao/            # 数据访问层
+│   │   │   ├── model/          # 数据模型
+│   │   │   ├── servlet/        # Servlet 控制器
+│   │   │   ├── filter/         # 登录过滤器
+│   │   │   └── listener/       # 应用监听器
+│   │   ├── resources/
+│   │   │   └── db.properties   # 【需配置】数据库连接
+│   │   └── webapp/
+│   │       ├── WEB-INF/web.xml
+│   │       ├── knowledge-base.jsp      # 知识库聊天页面
+│   │       ├── employee/              # 员工门户页面
+│   │       │   ├── employee-login.jsp
+│   │       │   └── employee-portal.jsp
+│   │       ├── images/avatar/        # 角色头像 SVG/PNG
+│   │       ├── css/
+│   │       └── js/
+│   └── qiuniu-deploy/          # 部署包模板
+│       ├── scripts/install.sh   # Linux 一键安装脚本
+│       ├── sql/init-db.sql      # 数据库初始化脚本（同 ../init-db.sql）
+│       └── docs/INSTALL.md      # 安装文档
+│
+├── bank_kb/                      # Flask RAG 服务（Python）
+│   ├── app.py                   # Flask 主应用（API 服务）
+│   ├── config.py                # 【需配置】Flask 服务配置
+│   ├── db_loader.py            # 数据库操作层
+│   ├── generator.py            # AI 大模型调用（硅基流动 API）
+│   ├── hybrid_search.py        # BM25 + 向量混合检索
+│   ├── bm25_search.py          # BM25 关键词检索（纯 Python 实现）
+│   ├── requirements.txt         # Python 依赖列表
+│   ├── INSTALL.md             # Flask 服务安装文档
+│   ├── OPS.md                 # Flask 服务运维文档
+│   └── data/                  # 知识库原始文档存放目录
+│
+└── README.md                    # 本文件
 ```
 
 ---
 
 ## ⚙️ 配置说明
 
-### 1. 数据库配置
+### 1. Tomcat 应用配置
 
-**配置文件位置：** `src/main/resources/db.properties`
-
-**需要修改的内容：**
+**文件：** `qiuniu-src/src/main/resources/db.properties`
 
 ```properties
-# MySQL 数据库连接 URL
+# MySQL 连接配置
 db.url=jdbc:mysql://localhost:3306/qiuniu_db?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf-8&allowPublicKeyRetrieval=true
-
-# MySQL 用户名
 db.username=root
+db.password=NewPassword123!
 
-# MySQL 密码（⚠️ 必须修改）
-db.password=your_password_here
+# AI 大模型配置（可选，用于提示词分析）
+ai.api.url=https://api.siliconflow.cn/v1
+ai.api.key=your_api_key_here
+ai.model=Qwen/Qwen2.5-72B-Instruct
 ```
 
-### 2. 数据库初始化
+### 2. Flask RAG 服务配置
 
-系统首次启动时会自动创建数据库表，但需要预先创建数据库：
+**文件：** `bank_kb/config.py`
 
-```sql
--- 登录 MySQL 后执行
-CREATE DATABASE qiuniu_db DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+```python
+# MySQL 连接配置（需与 Tomcat 应用使用同一个数据库）
+MYSQL_HOST = 'localhost'
+MYSQL_PORT = 3306
+MYSQL_USER = 'root'
+MYSQL_PASSWORD = 'NewPassword123!'
+MYSQL_DATABASE = 'qiuniu_db'
+
+# AI 大模型配置（硅基流动 API）
+LLM_API_URL = "https://api.siliconflow.cn/v1/chat/completions"
+LLM_API_KEY = "sk-xxx"   # ← 填写你的 API Key
+LLM_MODEL = "Qwen/Qwen2.5-72B-Instruct"
+
+# 检索配置
+RETRIEVAL_MODE = "bm25"   # bm25 / vector / hybrid（需 Ollama 支持才可用 vector/hybrid）
+TOP_K = 5                   # 每次检索返回的最大片段数
+CONFIDENCE_THRESHOLD = 0.2  # 低于此分数触发「向本人提问」
+
+# Tomcat 部署路径（头像上传需写入此目录）
+TOMCAT_CONTEXT = "/qiuniu"
+WEBAPP_ROOT = "C:/apache-tomcat-9.0.96/webapps/qiuniu"
 ```
 
-**自动创建的表：**
-- `users` - 用户表
-- `prompts` - 提示词表
+### 3. 头像上传目录
+
+Flask 服务需要将上传的头像写入 Tomcat 部署目录：
+
+```
+# 自动创建的目录：
+C:\apache-tomcat-9.0.96\webapps\qiuniu\static\avatars\
+```
 
 ---
 
@@ -79,73 +131,167 @@ CREATE DATABASE qiuniu_db DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_
 
 ### 环境要求
 
-- JDK 11 或更高版本
-- Apache Tomcat 9.x 或更高版本
-- MySQL 8.0 或更高版本
-- Maven 3.6+
+| 组件 | 版本要求 | 说明 |
+|------|----------|------|
+| JDK | 17+ | Tomcat 9 要求 JDK 11+，项目使用 JDK 17 编译 |
+| Apache Tomcat | 9.x | Web 应用服务器 |
+| MySQL | 8.0+ | 数据库（需支持 utf8mb4） |
+| Python | 3.9+ | Flask RAG 服务运行环境 |
+| pip | 最新 | Python 包管理工具 |
+| Maven | 3.6+ | Java 项目构建工具 |
+| Git | 可选 | 仅在使用「版本对比」功能时需要 |
 
-### 步骤 1：编译项目
+### 步骤 1：初始化数据库
 
 ```bash
-cd D:\OpenclawCode\QiuNiu
-mvn clean package
+# 登录 MySQL
+mysql -u root -p
+
+# 执行初始化脚本（自动创建 15 张表 + 默认管理员账号）
+source D:\qiuniu20260506\qiuniu-src\init-db.sql
 ```
 
-编译后的 WAR 文件位于：`target/qiuniu.war`
+**默认管理员账号：**
+- 用户名：`admin`
+- 密码：`admin123`
 
-### 步骤 2：部署到 Tomcat
+### 步骤 2：配置 Tomcat 应用
 
-1. 将 `target/qiuniu.war` 复制到 Tomcat 的 `webapps` 目录
-2. 启动 Tomcat
+编辑 `qiuniu-src/src/main/resources/db.properties`，填写 MySQL 密码。
+
+### 步骤 3：编译并部署 Tomcat 应用
 
 ```bash
-# Windows
-cd %TOMCAT_HOME%\bin
+# 编译项目（跳过测试加快速度）
+cd D:\qiuniu20260506\qiuniu-src
+mvn clean package -DskipTests
+
+# 将 WAR 包复制到 Tomcat
+copy target\qiuniu.war C:\apache-tomcat-9.0.96\webapps\
+
+# 启动 Tomcat（如果未启动）
+cd C:\apache-tomcat-9.0.96\bin
 startup.bat
-
-# Linux/Mac
-cd $TOMCAT_HOME/bin
-./startup.sh
 ```
 
-### 步骤 3：访问应用
+访问：`http://localhost:8080/qiuniu/`
 
-打开浏览器访问：`http://localhost:8080/qiuniu/`
+### 步骤 4：安装并启动 Flask RAG 服务
+
+```bash
+# 安装 Python 依赖
+cd D:\qiuniu20260506\bank_kb
+pip install -r requirements.txt
+
+# 配置 config.py（填写 LLM_API_KEY）
+
+# 启动 Flask 服务（默认端口 5001）
+python app.py
+```
+
+访问 RAG 服务：`http://localhost:5001/`（API 基础路径）
+
+> 💡 **生产环境建议**：使用 `waitress` 或 `gunicorn` 运行 Flask，而非直接运行 `app.py`。
+
+### 步骤 5：验证部署
+
+1. 打开 `http://localhost:8080/qiuniu/login.jsp`
+2. 使用 `admin / admin123` 登录
+3. 进入「知识库」页面，上传一份文档测试 RAG 检索
+4. 打开 `http://localhost:8080/qiuniu/employee/employee-login.jsp`，用工号登录员工门户
 
 ---
 
-## 📖 使用说明
+## 📖 使用指南
 
-### 1. 注册账号
+### 管理员使用指南
 
-- 访问登录页面，点击"立即注册"
-- 填写用户名、密码等信息
-- 用户名长度：3-20 位字母或数字
-- 密码长度：至少 6 位
+#### 1. 知识库管理
 
-### 2. 登录系统
+登录后点击顶部「📖 知识库」进入知识库页面。
 
-- 输入用户名和密码
-- 可选"记住我"功能（7 天免登录）
+**手动录入知识点：**
+1. 点击「+ 新增」按钮
+2. 填写「问题」和「答案」
+3. 选择分类
+4. 保存
 
-### 3. 管理提示词
+**从文档导入知识点：**
+1. 点击「📄 文档导入」
+2. 上传 Word（.docx）、PDF（.pdf）或纯文本（.txt）文件
+3. 系统自动解析文档内容，按段落拆分为知识点
+4. 导入完成后可逐个审核并启用
 
-登录后进入控制台，可以：
+**检索测试：**
+- 在底部输入框输入问题，观察 AI 回答是否命中知识库
 
-- **新建提示词**：点击右上角"+ 新建提示词"按钮
-- **编辑提示词**：点击列表中的"编辑"按钮
-- **删除提示词**：点击列表中的"删除"按钮
-- **搜索提示词**：在搜索框输入关键词
-- **分类筛选**：使用分类下拉框筛选
+#### 2. 虚拟角色管理
 
-### 4. 提示词字段说明
+每个「虚拟角色」对应一套独立的人设（系统提示词）和关联的知识库。
 
-| 字段 | 说明 | 必填 |
-|------|------|------|
-| 名称 | 提示词的标题 | 是 |
-| 分类 | 用于分类管理（如：代码生成、文案写作） | 否 |
-| 描述 | 简要描述提示词用途 | 否 |
-| 内容 | 完整的提示词文本 | 是 |
+**配置角色（通过数据库或管理后台）：**
+
+```sql
+INSERT INTO virtual_characters (name, title, description, system_prompt, categories, confidence_threshold)
+VALUES (
+  '智能客服',
+  '智能客服助手',
+  '回答客户常见问题',
+  '你是某银行的智能客服助手，基于知识库回答客户问题。如无法回答，引导客户联系人工客服。',
+  '开户,转账,理财',
+  0.2
+);
+```
+
+**关联员工：**
+```sql
+-- 将角色 ID=2 分配给员工 ID=3
+UPDATE virtual_characters SET employee_id = 3 WHERE id = 2;
+```
+
+#### 3. 提示词管理
+
+登录后进入「控制台」，进行提示词的增删改查。
+
+---
+
+### 员工使用指南
+
+#### 1. 登录员工门户
+
+1. 访问 `http://localhost:8080/qiuniu/employee/employee-login.jsp`
+2. 输入工号（如 `EMP001`）和密码
+3. 首次登录默认密码为 `123456`，登录后请修改
+
+#### 2. 回答客户问题
+
+1. 登录后自动进入「待回答问题」列表
+2. 点击「回答」按钮，填写答案
+3. 提交后，系统自动将 Q&A 录入知识库
+4. 该问题同时从「待回答」列表消失
+
+#### 3. 上传头像
+
+1. 点击页面右上角头像区域
+2. 选择本地图片上传
+3. 上传成功后，客户在知识库聊天页面看到的就是上传的头像
+
+---
+
+### 最终用户（客户）使用指南
+
+#### 1. 与 AI 对话
+
+1. 访问 `http://localhost:8080/qiuniu/knowledge-base.jsp`
+2. 在底部输入框输入问题
+3. AI 基于知识库内容回答，并附上参考来源（知识点 N）
+
+#### 2. 向本人提问
+
+如果 AI 回答不满意：
+1. 点击 AI 回复下方的「没有我满意的答案，我要向本人提问」
+2. 问题自动推送到关联员工的「待回答问题」列表
+3. 员工回答后，答案自动录入知识库，下次 AI 就能直接回答
 
 ---
 
@@ -153,84 +299,96 @@ cd $TOMCAT_HOME/bin
 
 ### 技术栈
 
-- **后端**：Java Servlet 4.0, JSP
-- **数据库**：MySQL 8.0
-- **连接池**：Apache DBCP2
-- **构建工具**：Maven
-- **密码加密**：BCrypt
+| 层级 | 技术 |
+|------|------|
+| 前端 | JSP, HTML5, CSS3, Vanilla JavaScript |
+| Web 框架 | Java Servlet 4.0 + Apache Tomcat 9 |
+| RAG 服务 | Python 3 + Flask + Flask-CORS |
+| 数据库 | MySQL 8.0（InnoDB 引擎，utf8mb4 字符集） |
+| 检索引擎 | BM25（关键词）+ Milvus（向量，可选） |
+| AI 大模型 | 硅基流动 API（兼容 OpenAI 格式） |
+| 密码加密 | BCrypt（Java: jbcrypt / Python: bcrypt） |
+| 构建工具 | Maven 3.6+ |
+| 文档解析 | Apache POI（Word）+ PyPDF2/PDFMiner（PDF） |
 
-### 依赖管理
+### API 接口概览
 
-所有依赖在 `pom.xml` 中配置：
+#### Tomcat 应用（端口 8080）
 
-```xml
-<!-- 主要依赖 -->
-- javax.servlet-api (Servlet 容器)
-- mysql-connector-java (MySQL 驱动)
-- commons-dbcp2 (数据库连接池)
-- gson (JSON 处理)
-- jbcrypt (密码加密)
-```
-
-### API 接口
-
-| 接口 | 方法 | 说明 |
+| 路径 | 方法 | 说明 |
 |------|------|------|
-| `/login` | POST | 用户登录 |
-| `/register` | POST | 用户注册 |
-| `/logout` | GET | 退出登录 |
-| `/prompt` | GET | 获取提示词列表 |
-| `/prompt` | POST | 创建/更新/删除提示词 |
+| `/login` | POST | 管理员登录 |
+| `/employee/login` | POST | 员工登录（工号 + 密码） |
+| `/api/prompt` | GET/POST | 提示词 CRUD |
+| `/api/git/*` | GET/POST | Git 版本对比 |
 
-**请求参数示例：**
+#### Flask RAG 服务（端口 5001）
 
-```
-# 获取列表
-GET /prompt?action=list
-GET /prompt?action=list&category=代码生成
-GET /prompt?action=search&keyword=关键词
-
-# 创建
-POST /prompt
-action=create&name=名称&content=内容&category=分类&description=描述
-
-# 更新
-POST /prompt
-action=update&id=1&name=新名称&content=新内容
-
-# 删除
-POST /prompt
-action=delete&id=1
-```
+| 路径 | 方法 | 说明 |
+|------|------|------|
+| `/query` | POST | 单轮问答（RAG 检索 + LLM 生成） |
+| `/api/chat` | POST | 多轮对话（支持上下文） |
+| `/api/characters` | GET | 获取所有启用角色 |
+| `/api/unanswered/submit` | POST | 提交「向本人提问」问题 |
+| `/api/employee/questions` | GET | 员工查看待回答问题 |
+| `/api/employee/questions/<id>/answer` | POST | 员工回答问题（自动录入知识库） |
+| `/api/employee/avatar/upload` | POST | 员工上传头像 |
 
 ---
 
 ## 🔐 安全说明
 
-- 密码使用 BCrypt 加密存储
-- 会话超时时间：30 分钟
+- 管理员密码和员工密码均使用 **BCrypt** 加密存储，不可逆
+- 管理员会话超时：**30 分钟**
+- 员工会话超时：**8 小时**（适合工作时间）
 - 所有页面需要登录访问（除登录/注册页）
-- 支持"记住我"功能（7 天）
+- 支持「记住我」功能（管理员 7 天免登录）
+- Flask RAG 服务仅接受来自 Tomcat（localhost:8080）的跨域请求（`CORS(origins=["http://localhost:8080"])`）
+- 生产环境建议为 Flask 服务添加 API 鉴权（Token 或 JWT）
 
 ---
 
 ## 📝 常见问题
 
-### Q: 数据库连接失败？
-A: 检查 `db.properties` 中的配置是否正确，确保 MySQL 服务已启动。
+### Q: Flask 服务启动后知识库回答提示「服务不可用」？
+A: 检查以下内容：
+1. Flask 是否运行在 `localhost:5001`（默认端口）
+2. Tomcat 应用是否能访问 `localhost:5001/query`（可在浏览器直接访问测试）
+3. 检查 `bank_kb/config.py` 中的 `LLM_API_KEY` 是否填写正确
+4. 查看 Flask 控制台日志，确认是否有报错
 
-### Q: 表没有自动创建？
-A: 检查应用日志，确保数据库已创建且有足够权限。
+### Q: 员工登录提示「工号或密码错误」？
+A: 
+1. 确认员工记录已录入 `employees` 表
+2. 密码是经过 BCrypt 加密存储的，不可直接写入明文
+3. 可使用 `bcrypt.hashpw('123456'.encode(), bcrypt.gensalt())` 生成密码哈希
 
-### Q: 中文乱码？
-A: 确保 Tomcat 配置了 UTF-8 编码，数据库使用 utf8mb4 字符集。
+### Q: 「向本人提问」提交后员工看不到问题？
+A: 
+1. 确认 `virtual_characters` 表的 `employee_id` 字段已正确关联员工 ID
+2. 员工登录后，系统根据 `employee_id` 反向查找 `character_id`，再查询 `unanswered_questions` 表
+3. 可在数据库直接查询验证：
+   ```sql
+   SELECT q.* FROM unanswered_questions q
+   JOIN virtual_characters v ON q.character_id = v.id
+   WHERE v.employee_id = <员工ID> AND q.status = 'pending';
+   ```
+
+### Q: 文档导入后知识点内容为空白？
+A: 
+1. 检查文档是否为扫描版 PDF（需 OCR 才能提取文字）
+2. Word 文档需为 `.docx` 格式（`.doc` 格式不支持）
+3. 查看 `bank_kb/logs/` 下的错误日志
+
+### Q: Git 版本对比功能报错「Network is unreachable」？
+A: Git 版本对比需要从服务器访问 GitHub/GitLab，如果服务器没有配置代理或没有互联网访问，功能将无法使用。可忽略此功能，不影响其他模块。
 
 ---
 
 ## 📄 许可证
 
-本项目仅供学习和个人使用。
+本项目仅供企业内部使用。
 
 ---
 
-**🦞 囚牛 - 让提示词管理更简单**
+**🐲 囚牛 - 让知识触手可及**
