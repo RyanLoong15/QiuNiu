@@ -16,7 +16,7 @@ from db_loader import (
     insert_unanswered_question, register_employee,
 )
 from config import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRY_HOURS
-from config import WEBAPP_ROOT, ALLOWED_EXTENSIONS, MAX_FILE_SIZE
+from config import WEBAPP_ROOT, TOMCAT_CONTEXT, ALLOWED_EXTENSIONS, MAX_FILE_SIZE
 from config import _LOGIN_ATTEMPTS, MAX_ATTEMPTS, WINDOW_SECONDS, _TOKEN_BLACKLIST
 
 print(f"[DEBUG] Loading employee_portal_bp from {__file__}")
@@ -172,7 +172,7 @@ def profile():
     unread_count = count_employee_questions(emp["id"], status="pending")
     avatar_url = None
     if emp.get("avatar_uploaded_path"):
-        avatar_url = f"/static/avatars/{emp['avatar_uploaded_path']}"
+        avatar_url = f"{TOMCAT_CONTEXT}/static/avatars/{emp['avatar_uploaded_path']}"
     return jsonify({
         "code": 200,
         "message": "获取成功",
@@ -225,7 +225,7 @@ def avatar_upload():
     return jsonify({
         "code": 200,
         "message": "上传成功，管理员审核后将生效",
-        "data": {"filename": filename, "url": f"/static/avatars/{filename}"}
+        "data": {"filename": filename, "url": f"{TOMCAT_CONTEXT}/static/avatars/{filename}"}
     })
 
 
@@ -258,7 +258,7 @@ def avatar_generate():
     return jsonify({
         "code": 200,
         "message": "头像生成成功（占位）",
-        "data": {"url": f"/static/avatars/{generated_path}"}
+        "data": {"url": f"{TOMCAT_CONTEXT}/static/avatars/{generated_path}"}
     })
 
 
@@ -303,6 +303,72 @@ def mark_question_read(qid):
             return jsonify({"code": 200, "message": "标记已读成功", "data": None})
         else:
             return jsonify({"code": 404, "message": "问题不存在或已读", "data": None}), 404
+    except Exception as e:
+        return jsonify({"code": 500, "message": str(e), "data": None}), 500
+
+
+@bp.route("/questions/<int:qid>/answer", methods=["POST"])
+@require_employee_auth
+def answer_question(qid):
+    """员工回答未答问题，并自动录入知识库."""
+    emp = request.employee
+    body = request.get_json(silent=True) or {}
+    answer = (body.get("answer") or "").strip()
+    if not answer:
+        return jsonify({"code": 400, "message": "回答不能为空", "data": None}), 400
+
+    try:
+        from db_loader import get_connection, answer_unanswered_question, ConcurrencyConflictError
+        # 先获取问题信息
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT question, character_id, status FROM unanswered_questions WHERE id=%s", (qid,))
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+
+        if not row:
+            return jsonify({"code": 404, "message": "问题不存在", "data": None}), 404
+        if row[2] != 'pending':
+            return jsonify({"code": 409, "message": "问题已被处理", "data": None}), 409
+
+        try:
+            success = answer_unanswered_question(
+                uq_id=qid,
+                answer=answer,
+                answered_by=emp.get("name", ""),
+            )
+            if not success:
+                return jsonify({"code": 404, "message": "问题不存在", "data": None}), 404
+        except ConcurrencyConflictError:
+            return jsonify({"code": 409, "message": "问题已被其他同事处理", "data": None}), 409
+
+        # 自动录入知识库
+        kb_entry_id = None
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+            question_text = row[0]
+            char_id = row[1]
+            category = '未分类'
+            if char_id:
+                cursor.execute("SELECT name FROM virtual_characters WHERE id=%s", (char_id,))
+                char_row = cursor.fetchone()
+                if char_row:
+                    category = char_row[0]
+            cursor.execute(
+                "INSERT INTO knowledge_base (question, answer, category, enabled) VALUES (%s, %s, %s, 1)",
+                (question_text, answer, category)
+            )
+            kb_entry_id = cursor.lastrowid
+            cursor.execute("UPDATE unanswered_questions SET kb_entry_id=%s WHERE id=%s", (kb_entry_id, qid))
+            conn.commit()
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            print(f"[Employee] Auto-KB insert failed: {e}")
+
+        return jsonify({"code": 200, "message": "回答成功，已自动录入知识库", "data": {"kb_entry_id": kb_entry_id}})
     except Exception as e:
         return jsonify({"code": 500, "message": str(e), "data": None}), 500
 

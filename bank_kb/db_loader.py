@@ -365,7 +365,7 @@ def answer_unanswered_question(
         成功返回 True
     
     Raises:
-        ConcurrencyConflictError: 如果 affected_rows=0（已被其他用户处理）
+        ConcurrencyConflictError: 如果问题已被其他用户处理（affected_rows=0 且记录存在）
     """
     try:
         conn = get_connection()
@@ -384,16 +384,27 @@ def answer_unanswered_question(
         )
         
         affected_rows = cursor.rowcount
+        
+        # affected_rows=0 需要区分：问题不存在 vs 已被处理
+        if affected_rows == 0:
+            # 检查问题是否存在
+            cursor.execute(
+                "SELECT id FROM unanswered_questions WHERE id = %s",
+                (uq_id,)
+            )
+            row_exists = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            if not row_exists:
+                return False  # 不存在 → 404
+            else:
+                raise ConcurrencyConflictError(
+                    f"Question {uq_id} has already been processed"
+                )
+        
         conn.commit()
         cursor.close()
         conn.close()
-        
-        # affected_rows=0 表示已被处理，抛出并发冲突异常
-        if affected_rows == 0:
-            raise ConcurrencyConflictError(
-                f"Question {uq_id} has already been processed by another user"
-            )
-        
         return True
     
     except mysql.connector.Error as e:

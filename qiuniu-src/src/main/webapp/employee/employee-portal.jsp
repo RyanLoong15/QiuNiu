@@ -71,18 +71,18 @@
         .question-item:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
         .question-text { flex: 1; font-size: 14px; color: #333; }
         .question-meta { font-size: 12px; color: #999; margin-top: 4px; }
-        .btn-mark-read {
-            background: #667eea;
-            color: #fff;
-            border: none;
-            padding: 6px 14px;
-            border-radius: 6px;
+        .btn-answer-q {
+            padding: 5px 12px;
+            border: 1px solid #667eea;
+            border-radius: 14px;
+            background: transparent;
+            color: #667eea;
+            font-size: 12px;
             cursor: pointer;
-            font-size: 13px;
-            white-space: nowrap;
+            transition: all 0.2s;
+            margin-right: 6px;
         }
-        .btn-mark-read:hover { opacity: 0.85; }
-        .btn-mark-read.done { background: #aaa; cursor: default; }
+        .btn-answer-q:hover { background: #667eea; color: #fff; }
         .avatar-section { display: flex; align-items: center; gap: 24px; }
         .avatar-preview {
             width: 100px; height: 100px;
@@ -92,21 +92,15 @@
             background: #fafafa;
         }
         .avatar-actions { display: flex; flex-direction: column; gap: 10px; }
-        .btn-upload, .btn-generate {
+        .btn-upload {
             padding: 10px 20px;
             border: none;
             border-radius: 8px;
             cursor: pointer;
             font-size: 14px;
             font-weight: 600;
-        }
-        .btn-upload {
             background: #667eea;
             color: #fff;
-        }
-        .btn-generate {
-            background: #f0f0f0;
-            color: #333;
         }
         .hidden { display: none !important; }
         .empty-tip { text-align: center; color: #aaa; padding: 40px 0; font-size: 14px; }
@@ -153,7 +147,6 @@
                     <input type="file" id="fileInput" accept="image/png,image/jpg,image/jpeg,image/gif"
                            style="display:none;" onchange="doUpload()">
                 </label>
-                <button class="btn-generate" onclick="doGenerate()">AI 生成卡通头像</button>
             </div>
         </div>
         <div id="avatarMsg" style="margin-top:12px;font-size:13px;color:#666;"></div>
@@ -161,7 +154,7 @@
 </div>
 
 <script>
-    const API = '<%= request.getContextPath() %>/api/employee';
+    const API = 'http://localhost:5001/api/employee';
     let currentPage = 1;
     const PAGE_SIZE = 20;
 
@@ -224,13 +217,14 @@
                 div.className = 'question-item';
                 const statusText = q.status === 'pending' ? '待回答' : (q.status === 'answered' ? '已回答' : q.status);
                 const answeredInfo = q.answer ? '<div class="question-meta">回答：' + escHtml(q.answer.substring(0, 50)) + '...</div>' : '';
+                const answerBtn = q.status === 'pending' ? '<button class="btn-answer-q" onclick="showAnswerForm(' + q.id + ', this)">回答</button>' : '';
                 div.innerHTML =
                     '<div style="flex:1;">' +
                         '<div class="question-text">' + escHtml(q.question) + '</div>' +
                         '<div class="question-meta">' + statusText + ' · ' + (q.created_at || '') + '</div>' +
                         answeredInfo +
                     '</div>' +
-                    '<button class="btn-mark-read" data-id="' + q.id + '" onclick="markRead(' + q.id + ', this)">标为已读</button>';
+                    answerBtn;
                 list.appendChild(div);
             });
 
@@ -254,6 +248,54 @@
                 loadProfile();
             }
         });
+    }
+
+    function showAnswerForm(qid, btn) {
+        const item = btn.closest('.question-item');
+        // 防止重复添加
+        if (item.querySelector('.answer-form')) return;
+        const form = document.createElement('div');
+        form.className = 'answer-form';
+        form.style.cssText = 'margin-top:10px;display:flex;gap:8px;align-items:flex-start;';
+        form.innerHTML = '<textarea placeholder="输入回答..." style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;resize:vertical;min-height:60px;font-size:13px;"></textarea>' +
+            '<button class="btn-submit-answer" onclick="submitAnswer(' + qid + ', this)" style="padding:8px 16px;background:#667eea;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">提交</button>';
+        item.querySelector('div[style]').appendChild(form);
+        form.querySelector('textarea').focus();
+    }
+
+    function submitAnswer(qid, btn) {
+        const form = btn.closest('.answer-form');
+        const textarea = form.querySelector('textarea');
+        const answer = textarea.value.trim();
+        if (!answer) { alert('请输入回答'); return; }
+        btn.disabled = true;
+        btn.textContent = '提交中...';
+        fetch(API + '/questions/' + qid + '/answer', {
+            method: 'POST',
+            headers: { ...authHeader(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ answer: answer })
+        })
+        .then(r => r.json())
+        .then(res => {
+            if (res.code === 200) {
+                btn.textContent = '✓ 已回答';
+                btn.style.background = '#27ae60';
+                textarea.disabled = true;
+                // 自动标记已读
+                fetch(API + '/questions/' + qid + '/read', {
+                    method: 'POST',
+                    headers: authHeader()
+                }).finally(() => {
+                    loadQuestions(1);
+                    loadProfile();
+                });
+            } else {
+                btn.textContent = '提交';
+                btn.disabled = false;
+                alert(res.message || '提交失败');
+            }
+        })
+        .catch(() => { btn.textContent = '提交'; btn.disabled = false; });
     }
 
     function renderPagination(total, page, pageSize) {
@@ -296,25 +338,6 @@
         .catch(() => {
             document.getElementById('avatarMsg').style.color = '#e74c3c';
             document.getElementById('avatarMsg').textContent = '网络错误';
-        });
-    }
-
-    function doGenerate() {
-        document.getElementById('avatarMsg').textContent = '生成中（占位）...';
-        fetch(API + '/avatar/generate', {
-            method: 'POST',
-            headers: authHeader()
-        })
-        .then(r => r.json())
-        .then(res => {
-            if (res.code === 200) {
-                document.getElementById('avatarMsg').style.color = '#27ae60';
-                document.getElementById('avatarMsg').textContent = '生成成功！';
-                loadProfile();
-            } else {
-                document.getElementById('avatarMsg').style.color = '#e74c3c';
-                document.getElementById('avatarMsg').textContent = res.message || '生成失败';
-            }
         });
     }
 

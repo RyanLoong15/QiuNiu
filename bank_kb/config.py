@@ -107,7 +107,10 @@ JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = 8
 
 # 员工门户静态根目录（用于拼接头像保存路径）
-WEBAPP_ROOT = os.getenv("WEBAPP_ROOT", r"D:\qiuniu20260506\qiuniu-src\src\main\webapp")
+WEBAPP_ROOT = os.getenv("WEBAPP_ROOT", r"C:\apache-tomcat-9.0.96\webapps\qiuniu")
+
+# Tomcat 上下文路径（用于拼接头像访问 URL）
+TOMCAT_CONTEXT = os.getenv("TOMCAT_CONTEXT", "/qiuniu")
 
 # 头像上传限制
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif"}

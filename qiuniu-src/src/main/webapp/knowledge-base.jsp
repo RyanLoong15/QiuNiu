@@ -354,6 +354,22 @@
         }
 
         /* ===== Scrollbar ===== */
+        .btn-ask-human {
+            display: inline-block;
+            margin-top: 8px;
+            padding: 6px 14px;
+            border: 1px solid #667eea;
+            border-radius: 16px;
+            background: transparent;
+            color: #667eea;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-ask-human:hover {
+            background: #667eea;
+            color: white;
+        }
         ::-webkit-scrollbar { width: 5px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #d0d5e8; border-radius: 3px; }
@@ -781,6 +797,7 @@ const IS_ADMIN = <%= isAdmin %>;
 let kbData = [];
 let currentFilter = '';
 let isSending = false;
+let lastUserQuestion = '';
 let canWrite = CAN_WRITE;
 
 const avatarFallback = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><circle cx="20" cy="20" r="20" fill="#667eea"/><text x="20" y="26" text-anchor="middle" fill="white" font-size="18">🐉</text></svg>');
@@ -968,6 +985,32 @@ function askQuestion(q) {
 
 // ===== Chat =====
 
+async function submitToHuman(btn, question, characterId) {
+    btn.disabled = true;
+    btn.textContent = '提交中...';
+    try {
+        const resp = await fetch(API + '/unanswered', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question: question, character_id: characterId }),
+            credentials: 'same-origin'
+        });
+        if (resp.ok) {
+            btn.textContent = '✓ 已提交，等待本人回答';
+            btn.style.background = '#27ae60';
+            btn.style.borderColor = '#27ae60';
+            btn.style.color = '#fff';
+            btn.style.cursor = 'default';
+        } else {
+            btn.textContent = '提交失败，请重试';
+            btn.disabled = false;
+        }
+    } catch(e) {
+        btn.textContent = '提交失败，请重试';
+        btn.disabled = false;
+    }
+}
+
 function handleKeyDown(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -990,6 +1033,7 @@ async function sendMessage() {
     document.getElementById('btnSend').disabled = true;
 
     // Append user message
+    lastUserQuestion = msg;
     appendMsg('user', msg);
 
     // Append typing indicator & set avatar thinking
@@ -1063,6 +1107,19 @@ function appendMsg(role, text, id, sources) {
         sourcesDiv.className = 'sources';
         sourcesDiv.innerHTML = renderSources(sources);
         div.querySelector('.msg-content').appendChild(sourcesDiv);
+    }
+
+    // bot 消息后添加“向本人提问”按钮
+    if (isBot && role !== 'typing' && lastUserQuestion && currentCharacterId) {
+        const btnWrap = document.createElement('div');
+        btnWrap.style.cssText = 'margin-top:10px;';
+        const btn = document.createElement('button');
+        btn.className = 'btn-ask-human';
+        btn.textContent = '没有我满意的答案，我要向本人提问';
+        const questionToSubmit = lastUserQuestion;
+        btn.onclick = function() { submitToHuman(this, questionToSubmit, currentCharacterId); };
+        btnWrap.appendChild(btn);
+        div.querySelector('.msg-content').appendChild(btnWrap);
     }
 
     container.appendChild(div);

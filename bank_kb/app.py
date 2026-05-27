@@ -19,7 +19,7 @@ from config import TOP_K, LLM_MODEL, RETRIEVAL_MODE, DEBUG
 from db_loader import load_knowledge_entries, get_entries_count
 from db_loader import get_all_characters, get_character_by_id  # 角色管理
 from db_loader import get_unanswered_questions, get_unanswered_stats  # 未答问题
-from db_loader import answer_unanswered_question, ignore_unanswered_question  # 未答问题操作
+from db_loader import answer_unanswered_question, ignore_unanswered_question, ConcurrencyConflictError, get_connection  # 未答问题操作
 from generator import Generator
 
 # ✅ 统一使用 HybridSearchEngine（支持 vector/bm25/hybrid 三种模式）
@@ -205,13 +205,45 @@ def api_character_detail(id):
 # 未答问题管理接口 (Step-51)
 # ═════════════════════════════════════════════════════════════════
 
-@app.route("/api/unanswered", methods=["GET"])
+@app.route("/api/unanswered", methods=["GET", "POST"])
 def api_unanswered():
     """
-    获取未答问题列表.
-    Query params: character_id, status, page, page_size
-    Response: {"items": [...], "total": N, "page": 1, "page_size": 20}
+    GET: 获取未答问题列表.
+    POST: 提交新的未答问题（从知识库聊天提交）.
     """
+    if request.method == 'POST':
+        body = request.get_json(force=True) or {}
+        question = (body.get('question') or '').strip()
+        character_id = body.get('character_id')
+        if character_id is not None:
+            try:
+                character_id = int(character_id)
+            except (ValueError, TypeError):
+                character_id = None
+        session_id = body.get('session_id', '')
+
+        if not question:
+            return jsonify({"error": "Question is required", "code": 400}), 400
+        if character_id is None:
+            return jsonify({"error": "character_id is required", "code": 400}), 400
+
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO unanswered_questions (character_id, question, session_id, status) "
+                "VALUES (%s, %s, %s, 'pending')",
+                (character_id, question, session_id)
+            )
+            new_id = cursor.lastrowid
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return jsonify({"status": "ok", "id": new_id}), 201
+        except Exception as e:
+            return jsonify({"error": str(e), "code": 500}), 500
+
+    # GET: 获取未答问题列表
     character_id = request.args.get("character_id", type=int)
     status = request.args.get("status", "pending")
     page = request.args.get("page", 1, type=int)
@@ -244,13 +276,63 @@ def api_unanswered_stats():
 @app.route("/api/unanswered/<int:id>/answer", methods=["POST"])
 def api_unanswered_answer(id):
     """
-    标记未答问题为已答.
-    Request: {"answer": "...", "kb_entry_id": 123} (可选)
-    Response: {"status": "ok"} 或 409 Conflict
+    标记未答问题为已答，并自动录入知识库.
+    Request: {"answer": "...", "answered_by": "..."}
+    Response: {"status": "ok", "kb_entry_id": N} 或 409 Conflict
     """
     body = request.get_json(force=True) or {}
     answer_text = body.get("answer", "")
+    answered_by = body.get("answered_by", "")
     kb_entry_id = body.get("kb_entry_id")
+
+    if not answer_text:
+        return jsonify({"error": "Answer text is required", "code": 400}), 400
+
+    try:
+        success = answer_unanswered_question(
+            uq_id=id,
+            answer=answer_text,
+            answered_by=answered_by,
+            kb_entry_id=kb_entry_id,
+        )
+    except ConcurrencyConflictError:
+        return jsonify({"error": "Already answered by another", "code": 409}), 409
+
+    if not success:
+        return jsonify({"error": "Question not found or already processed", "code": 404}), 404
+
+    # 自动录入知识库：获取原问题文本，插入 knowledge_base
+    if not kb_entry_id:
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT question, character_id FROM unanswered_questions WHERE id=%s", (id,))
+            row = cursor.fetchone()
+            if row:
+                question_text = row[0]
+                char_id = row[1]
+                # 获取角色名作为分类
+                category = '未分类'
+                if char_id:
+                    cursor.execute("SELECT name FROM virtual_characters WHERE id=%s", (char_id,))
+                    char_row = cursor.fetchone()
+                    if char_row:
+                        category = char_row[0]
+                cursor.execute(
+                    "INSERT INTO knowledge_base (question, answer, category, enabled) VALUES (%s, %s, %s, 1)",
+                    (question_text, answer_text, category)
+                )
+                new_kb_id = cursor.lastrowid
+                # 回填 kb_entry_id
+                cursor.execute("UPDATE unanswered_questions SET kb_entry_id=%s WHERE id=%s", (new_kb_id, id))
+                conn.commit()
+                kb_entry_id = new_kb_id
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            print(f"[Unanswered] Auto-KB insert failed: {e}")
+
+    return jsonify({"status": "ok", "kb_entry_id": kb_entry_id})
     
 @app.route("/api/unanswered/<int:id>/ignore", methods=["POST"])
 def api_unanswered_ignore(id):
