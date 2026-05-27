@@ -1,4 +1,4 @@
-<%@ page contentType="text/html;charset=UTF-8" language="java" %>
+﻿<%@ page contentType="text/html;charset=UTF-8" language="java" %>
 <%@ page import="com.qiuniu.model.User" %>
 <%@ page import="com.qiuniu.dao.KnowledgeBaseDAO" %>
 <%@ page import="com.qiuniu.model.KnowledgeEntry" %>
@@ -1035,7 +1035,7 @@ function appendMsg(role, text, id, sources) {
         // 思考中：显示 thinking 叠加层
         div.innerHTML = `
             <div class="chat-avatar-container" style="position:relative;width:36px;height:36px;border-radius:50%;overflow:hidden;flex-shrink:0;background:transparent;">
-                <img src="' + getBotAvatar() + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">
+                <img src="${'$'}{getBotAvatar()}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">
                 <img class="mood-overlay thinking active" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_thinking.svg" style="position:absolute;top:0;left:0;width:100%;height:100%;">
                 <img class="mood-overlay happy" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_happy.svg" style="position:absolute;top:0;left:0;width:100%;height:100%;display:none;">
                 <img class="mood-overlay neutral" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_neutral.svg" style="position:absolute;top:0;left:0;width:100%;height:100%;display:none;">
@@ -1050,7 +1050,7 @@ function appendMsg(role, text, id, sources) {
         // bot 消息：默认不激活任何叠加层，等待 setAvatarMood 更新
         div.innerHTML = `
             <div class="chat-avatar-container" style="position:relative;width:36px;height:36px;border-radius:50%;overflow:hidden;flex-shrink:0;background:transparent;">
-                <img src="' + getBotAvatar() + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">
+                <img src="${'$'}{getBotAvatar()}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">
                 <img class="mood-overlay thinking" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_thinking.svg" style="position:absolute;top:0;left:0;width:100%;height:100%;display:none;">
                 <img class="mood-overlay happy" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_happy.svg" style="position:absolute;top:0;left:0;width:100%;height:100%;display:none;">
                 <img class="mood-overlay neutral" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_neutral.svg" style="position:absolute;top:0;left:0;width:100%;height:100%;display:none;">

@@ -265,6 +265,12 @@ def api_unanswered_ignore(id):
         return jsonify({"error": "Question not found or already processed", "code": 404}), 404
 
 
+
+
+@app.route("/api/clear", methods=["POST"])
+def api_clear():
+    return jsonify({"ok": True})
+
 @app.route("/api/history", methods=["GET"])
 def api_chat_history():
     """
