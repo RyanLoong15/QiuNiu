@@ -1,0 +1,65 @@
+# ===========================================
+# 囚牛 (QiuNiu) 数据库配置文件
+# ===========================================
+# 请根据您的 MySQL 环境修改以下配置
+
+# MySQL 数据库连接 URL
+# 格式：jdbc:mysql://主机：端口/数据库名？参数
+db.url=jdbc:mysql://localhost:3306/qiuniu_db?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf-8&allowPublicKeyRetrieval=true
+
+# MySQL 用户名
+db.username=root
+
+# MySQL 密码
+db.password=your_password_here
+
+# MySQL 驱动类名 (通常不需要修改)
+db.driver=com.mysql.cj.jdbc.Driver
+
+# 数据库连接池配置
+# 初始连接数
+db.pool.initialSize=5
+
+# 最大连接数
+db.pool.maxActive=20
+
+# 最大空闲连接数
+db.pool.maxIdle=10
+
+# 最小空闲连接数
+db.pool.minIdle=5
+
+# 连接超时时间 (毫秒)
+db.pool.maxWait=3000
+# ===========================================
+# AI 大模型配置（分析代码变更用）
+# ===========================================
+# AI 模型提供商：openai / claude / custom
+ai.provider=openai
+
+# API 地址（末尾不要加 /）
+# Groq 免费（Llama 3.3 70B）：https://api.groq.com/openai/v1
+# OpenAI：https://api.openai.com/v1
+# 硅基流动：https://api.siliconflow.cn/v1
+ai.api.url=https://api.siliconflow.cn/v1
+
+# API Key（必填，请替换为你的真实 Key）
+ai.api.key=your_api_key_here
+
+# 模型名称
+# Groq 免费：llama-3.3-70b-versatile
+# OpenAI：gpt-4o / gpt-4o-mini
+# 硅基流动：Qwen/Qwen2.5-72B-Instruct 等
+ai.model=Qwen/Qwen2.5-72B-Instruct
+
+# HTTP 代理（不需要则留空）
+ai.proxy=
+
+# 单次请求超时（秒）
+ai.timeout=60
+
+# 每次分析最大 token（影响分析详细程度，建议 4096）
+ai.maxTokens=4096
+
+# 是否启用 AI 分析（true / false，设为 false 则跳过 AI 分析）
+ai.enabled=false

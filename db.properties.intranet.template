@@ -1,0 +1,31 @@
+# ===========================================
+# 囚牛 (QiuNiu) 内网部署配置文件模板
+# 部署到内网服务器时，复制此文件为 db.properties 并修改以下字段
+# ===========================================
+
+# MySQL 数据库连接（修改为内网 MySQL 地址）
+db.url=jdbc:mysql://128.148.17.78:3306/qiuniu_db?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8&useUnicode=true&connectionCollation=utf8mb4_unicode_ci&allowPublicKeyRetrieval=true
+db.username=root
+db.password=<内网MySQL密码>
+
+# Flask RAG 服务地址（修改为内网 Flask 服务地址）
+flask.base.url=http://128.148.17.78:5001
+
+# 文档上传目录（必须指向 Flask 服务所在的 uploads/documents 目录）
+# Linux 示例：/opt/qiuniu/bank_kb/uploads/documents
+upload.dir=/opt/qiuniu/bank_kb/uploads/documents
+
+# AI 大模型配置（内网模型，通常不需要修改）
+ai.api.url=https://openapi.ai.jh/v1
+ai.api.key=<内网AI API Key>
+ai.model=DEEPSEEK-V4-284B-FLASH-V20260509
+ai.enabled=true
+ai.timeout=60
+ai.maxTokens=4096
+
+# 数据库连接池配置（通常不需要修改）
+db.pool.initialSize=5
+db.pool.maxActive=20
+db.pool.maxIdle=10
+db.pool.minIdle=5
+db.pool.maxWait=3000

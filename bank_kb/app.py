@@ -1,0 +1,488 @@
+# -*- coding: utf-8 -*-
+"""
+Bank KB - Flask API Service
+Provides RAG-based knowledge Q&A with virtual human persona.
+
+✅ 已集成 Milvus 向量检索 + BM25 混合检索
+✅ 支持自动降级（向量不可用 → BM25-only）
+✅ 支持多角色对话（character_id 参数）
+"""
+
+from flask import Flask, request, jsonify, send_from_directory
+from flask_cors import CORS
+import atexit, threading, time, os, hashlib, functools, traceback
+import re
+from werkzeug.utils import secure_filename
+import jwt as jwt_lib
+from datetime import datetime, timedelta
+
+from config import TOP_K, LLM_MODEL, RETRIEVAL_MODE, DEBUG
+from env_config import FLASK_BASE_URL, CORS_ORIGINS, get_avatar_url
+from db_loader import load_knowledge_entries, get_entries_count
+from db_loader import get_all_characters, get_character_by_id  # 角色管理
+from db_loader import get_unanswered_questions, get_unanswered_stats  # 未答问题
+from db_loader import answer_unanswered_question, ignore_unanswered_question, ConcurrencyConflictError, get_connection  # 未答问题操作
+from generator import Generator
+
+# ✅ 统一使用 HybridSearchEngine（支持 vector/bm25/hybrid 三种模式）
+from hybrid_search import get_hybrid_search
+engine = get_hybrid_search()
+print(f"[App] Using HybridSearchEngine (mode={RETRIEVAL_MODE})")
+
+app = Flask(__name__)
+CORS(app, origins=[CORS_ORIGINS], supports_credentials=True)
+generator = Generator()
+
+# ── Global index lock ─────────────────────────────────────────────
+_index_lock = threading.Lock()
+_entries_cache = []
+
+
+def _build_index():
+    """Load from DB and build the retrieval index."""
+    global _entries_cache
+    entries = load_knowledge_entries()
+    with _index_lock:
+        engine.build_index(entries)
+        _entries_cache = entries
+    print(f"[App] Index ready: {len(entries)} entries (mode={RETRIEVAL_MODE})")
+    # Debug: test retrieval
+# ── Background reindex ────────────────────────────────────────────
+def _schedule_reindex():
+    """Trigger a background reindex after a short delay."""
+    def _do():
+        time.sleep(2)  # debounce rapid reloads
+        _build_index()
+        print("[App] Background reindex complete.")
+    t = threading.Thread(target=_do, daemon=True)
+    t.start()
+
+
+# ── Init ──────────────────────────────────────────────────────────
+_build_index()
+atexit.register(lambda: None)  # no-op, kept for future cleanup
+
+
+# ═════════════════════════════════════════════════════════════════
+# API Endpoints
+# ═════════════════════════════════════════════════════════════════
+
+@app.route("/query", methods=["POST"])
+def query():
+    """
+    RAG Q&A endpoint (单轮对话).
+    Request: {"query": "问题", "top_k": 5}
+    Response: {"answer": "...", "sources": [...], "latency_ms": ..., "model": "..."}
+    """
+    body = request.get_json(force=True) or {}
+    # 过滤 Unicode 列表符号（U+2022 等 bullet 符号会导致检索500）
+    _raw_q = (body.get("query") or "").strip()
+    _raw_q = _raw_q.replace('\u2022', ' ').replace('\u25e6', ' ').replace('\u2043', ' ').replace('\u2219', ' ')
+    q = re.sub(r'\s+', ' ', _raw_q).strip()
+    if not q:
+        return jsonify({"error": "query is required", "code": 400}), 400
+
+    top_k = int(body.get("top_k", TOP_K))
+
+    with _index_lock:
+        results = engine.search(q, top_k=top_k)
+    print(f"[Query] '{q}' -> {len(results)} results")
+
+    gen_result = generator.generate(q, results)
+    return jsonify({
+        "answer": gen_result["answer"],
+        "sources": gen_result["sources"],
+        "retrieved_count": len(results),
+        "latency_ms": gen_result.get("latency_ms", 0),
+        "model": gen_result.get("model", LLM_MODEL),
+        "mode": gen_result.get("mode", "llm"),
+    })
+
+
+@app.route("/api/chat", methods=["POST"])
+def chat():
+    """
+    多轮对话接口 (支持历史上下文 + 角色切换).
+    Request: {"query": "问题", "character_id": 1, "top_k": 5, "history": [...], "session_id": "..."}
+    Response: {"answer": "...", "sources": [...], "latency_ms": ..., "model": "...", "character_id": ..., "character_name": "..."}
+    """
+    body = request.get_json(force=True) or {}
+    # 过滤 Unicode 列表符号（U+2022 等 bullet 符号会导致检索500）
+    _raw_q = (body.get("query") or "").strip()
+    _raw_q = _raw_q.replace('\u2022', ' ').replace('\u25e6', ' ').replace('\u2043', ' ').replace('\u2219', ' ')
+    q = re.sub(r'\s+', ' ', _raw_q).strip()
+    if not q:
+        return jsonify({"error": "query is required", "code": 400}), 400
+
+    top_k = int(body.get("top_k", TOP_K))
+    history = body.get("history", [])
+    character_id = int(body.get("character_id", 1))  # 默认囚牛
+    session_id = body.get("session_id", "")
+
+    # 参数校验：history 截断至多 10 轮
+    if len(history) > 10:
+        history = history[-10:]
+
+    # 参数校验：character_id 必须在角色列表中
+    char = get_character_by_id(character_id)
+    if not char:
+        return jsonify({"error": f"character_id={character_id} not found", "code": 400}), 400
+
+    with _index_lock:
+        results = engine.search(q, top_k=top_k)
+    print(f"[Chat] '{q}' -> {len(results)} results, history={len(history)}, character_id={character_id}", flush=True)
+
+    gen_result = generator.generate(q, results, history=history, character_id=character_id)
+    return jsonify({
+        "answer": gen_result["answer"],
+        "sources": gen_result["sources"],
+        "retrieved_count": len(results),
+        "latency_ms": gen_result.get("latency_ms", 0),
+        "model": gen_result.get("model", LLM_MODEL),
+        "mode": gen_result.get("mode", "llm"),
+        "character_id": gen_result.get("character_id", character_id),
+        "character_name": gen_result.get("character_name", ""),
+        "session_id": session_id,
+    })
+
+
+# ═════════════════════════════════════════════════════════════════
+# 角色管理接口 (Step-50)
+# ═════════════════════════════════════════════════════════════════
+
+@app.route("/api/characters", methods=["GET"])
+def api_characters():
+    """
+    获取角色列表.
+    Response: [{"id": 1, "name": "囚牛", "title": "银行智能助手", "avatar": "...", ...}]
+    """
+    characters = get_all_characters()
+    
+    # 拼接 avatar 路径
+    result = []
+    for c in characters:
+        avatar_path = c.get("avatar", "")
+        if avatar_path and not avatar_path.startswith("http"):
+            # 本地路径，拼接静态资源路径
+            avatar_path = get_avatar_url(avatar_path)
+        
+        result.append({
+            "id": c.get("id"),
+            "name": c.get("name", ""),
+            "title": c.get("title", ""),
+            "avatar": avatar_path,
+            "categories": c.get("categories", []),
+            "confidence_threshold": c.get("confidence_threshold", 0.3),
+            "description": c.get("description", ""),
+        })
+    
+    return jsonify(result)
+
+@app.route("/api/characters/<int:id>", methods=["GET"])
+def api_character_detail(id):
+    """
+    获取角色详情.
+    Response: {"id": 1, "name": "囚牛", "system_prompt": "...", ...}
+    """
+    character = get_character_by_id(id)
+    if not character:
+        return jsonify({"error": f"Character {id} not found", "code": 404}), 404
+    
+    avatar_path = character.get("avatar", "")
+    if avatar_path and not avatar_path.startswith("http"):
+        avatar_path = get_avatar_url(avatar_path)
+    
+    result = {
+        "id": character.get("id"),
+        "name": character.get("name", ""),
+        "title": character.get("title", ""),
+        "avatar": avatar_path,
+        "system_prompt": character.get("system_prompt", ""),
+        "categories": character.get("categories", []),
+        "confidence_threshold": character.get("confidence_threshold", 0.3),
+        "description": character.get("description", ""),
+        "created_at": character.get("created_at", ""),
+        "updated_at": character.get("updated_at", ""),
+    }
+    
+    return jsonify(result)
+
+
+# ═════════════════════════════════════════════════════════════════
+# 未答问题管理接口 (Step-51)
+# ═════════════════════════════════════════════════════════════════
+
+@app.route("/api/unanswered", methods=["GET", "POST"])
+def api_unanswered():
+    """
+    GET: 获取未答问题列表.
+    POST: 提交新的未答问题（从知识库聊天提交）.
+    """
+    if request.method == 'POST':
+        body = request.get_json(force=True) or {}
+        question = (body.get('question') or '').strip()
+        character_id = body.get('character_id')
+        if character_id is not None:
+            try:
+                character_id = int(character_id)
+            except (ValueError, TypeError):
+                character_id = None
+        session_id = body.get('session_id', '')
+
+        if not question:
+            return jsonify({"error": "Question is required", "code": 400}), 400
+        if character_id is None:
+            return jsonify({"error": "character_id is required", "code": 400}), 400
+
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO unanswered_questions (character_id, question, session_id, status) "
+                "VALUES (%s, %s, %s, 'pending')",
+                (character_id, question, session_id)
+            )
+            new_id = cursor.lastrowid
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return jsonify({"status": "ok", "id": new_id}), 201
+        except Exception as e:
+            return jsonify({"error": str(e), "code": 500}), 500
+
+    # GET: 获取未答问题列表
+    character_id = request.args.get("character_id", type=int)
+    status = request.args.get("status", "pending")
+    page = request.args.get("page", 1, type=int)
+    page_size = request.args.get("page_size", 20, type=int)
+    
+    # 限制 page_size
+    if page_size > 100:
+        page_size = 100
+    
+    result = get_unanswered_questions(
+        character_id=character_id,
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
+    
+    return jsonify(result)
+
+
+@app.route("/api/unanswered/stats", methods=["GET"])
+def api_unanswered_stats():
+    """
+    获取未答问题统计.
+    Response: {"total": N, "pending": N, "answered": N, "ignored": N, "by_character": {...}}
+    """
+    stats = get_unanswered_stats()
+    return jsonify(stats)
+
+
+@app.route("/api/unanswered/<int:id>/answer", methods=["POST"])
+def api_unanswered_answer(id):
+    """
+    标记未答问题为已答，并自动录入知识库.
+    Request: {"answer": "...", "answered_by": "..."}
+    Response: {"status": "ok", "kb_entry_id": N} 或 409 Conflict
+    """
+    body = request.get_json(force=True) or {}
+    answer_text = body.get("answer", "")
+    answered_by = body.get("answered_by", "")
+    kb_entry_id = body.get("kb_entry_id")
+
+    if not answer_text:
+        return jsonify({"error": "Answer text is required", "code": 400}), 400
+
+    try:
+        success = answer_unanswered_question(
+            uq_id=id,
+            answer=answer_text,
+            answered_by=answered_by,
+            kb_entry_id=kb_entry_id,
+        )
+    except ConcurrencyConflictError:
+        return jsonify({"error": "Already answered by another", "code": 409}), 409
+
+    if not success:
+        return jsonify({"error": "Question not found or already processed", "code": 404}), 404
+
+    # 自动录入知识库：获取原问题文本，插入 knowledge_base
+    if not kb_entry_id:
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT question, character_id FROM unanswered_questions WHERE id=%s", (id,))
+            row = cursor.fetchone()
+            if row:
+                question_text = row[0]
+                char_id = row[1]
+                # 获取角色名作为分类
+                category = '未分类'
+                if char_id:
+                    cursor.execute("SELECT name FROM virtual_characters WHERE id=%s", (char_id,))
+                    char_row = cursor.fetchone()
+                    if char_row:
+                        category = char_row[0]
+                cursor.execute(
+                    "INSERT INTO knowledge_base (question, answer, category, enabled) VALUES (%s, %s, %s, 1)",
+                    (question_text, answer_text, category)
+                )
+                new_kb_id = cursor.lastrowid
+                # 回填 kb_entry_id
+                cursor.execute("UPDATE unanswered_questions SET kb_entry_id=%s WHERE id=%s", (new_kb_id, id))
+                conn.commit()
+                kb_entry_id = new_kb_id
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            print(f"[Unanswered] Auto-KB insert failed: {e}")
+
+    return jsonify({"status": "ok", "kb_entry_id": kb_entry_id})
+    
+@app.route("/api/unanswered/<int:id>/ignore", methods=["POST"])
+def api_unanswered_ignore(id):
+    """
+    忽略未答问题.
+    Response: {"status": "ok"} 或 404
+    """
+    success = ignore_unanswered_question(id)
+    if success:
+        return jsonify({"status": "ok", "message": "Question ignored"})
+    else:
+        return jsonify({"error": "Question not found or already processed", "code": 404}), 404
+
+
+
+
+@app.route("/api/clear", methods=["POST"])
+def api_clear():
+    return jsonify({"ok": True})
+
+@app.route("/api/history", methods=["GET"])
+def api_chat_history():
+    """
+    获取聊天历史记录.
+    Query params: session_id (可选)
+    Response: {"history": [...]}    """
+    # TODO: 从数据库加载历史记录
+    # 暂时返回空历史
+    return jsonify({"history": []})
+
+
+
+
+@app.route("/reload", methods=["POST"])
+def reload():
+    """Trigger knowledge base reindex."""
+    _schedule_reindex()
+    return jsonify({"status": "ok", "message": "reindex scheduled"})
+
+
+@app.route("/status", methods=["GET"])
+def status():
+    """Health check + index stats."""
+    count = get_entries_count()
+    result = {
+        "status": "healthy",
+        "entries_count": count,
+        "indexed_count": len(_entries_cache),
+        "model": LLM_MODEL,
+        "retrieval_mode": RETRIEVAL_MODE,
+        "engine_status": engine.get_status(),
+    }
+    return jsonify(result)
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    """Simple liveness probe."""
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/health", methods=["GET"])
+def api_health():
+    """Health check endpoint (alias for /health)."""
+    return health()
+
+
+@app.route("/api/stats", methods=["GET"])
+def api_stats():
+    """Stats endpoint (alias for /status)."""
+    return status()
+
+
+@app.route("/debug/retrieve", methods=["POST"])
+def debug_retrieve():
+    """
+    Debug endpoint: call BM25 retriever directly.
+    Request: {"query": "...", "top_k": 5}
+    Response: {"bm25_results": [...], "entries_count": N}
+    """
+    body = request.get_json(force=True) or {}
+    q = (body.get("query") or "").strip()
+    top_k = int(body.get("top_k", TOP_K))
+    
+    if not q:
+        return jsonify({"error": "query is required"}), 400
+    
+    try:
+        # Call BM25 retriever directly
+        raw_results = engine.bm25_retriever.retrieve(q, top_k=top_k)
+        
+        # Also test vector retriever if available
+        vector_results = []
+        if engine._check_vector_available():
+            try:
+                vector_results = engine.vector_retriever.retrieve(q, top_k=top_k)
+            except Exception as e:
+                print(f"[Debug] Vector retrieve error: {e}")
+        
+        return jsonify({
+            "query": q,
+            "bm25_results": raw_results[:top_k],
+            "bm25_count": len(raw_results),
+            "vector_results_count": len(vector_results),
+            "entries_count": len(engine._entries_cache),
+            "indexed_count": engine.bm25_retriever.doc_count,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
+
+
+@app.route("/ingest", methods=["POST"])
+def ingest():
+    """
+    Import documents into the knowledge base.
+    Accepts: multipart/form-data with 'file' field
+    Also accepts: application/json with {"path": "..."} or {"dir": "..."}
+    Returns: {"status": "ok", "imported": N, "errors": [...]}
+    """
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+
+# ── 注册员工门户 Blueprint ─────────────────────────────
+
+from employee_portal_bp import bp as employee_bp
+app.register_blueprint(employee_bp)
+
+from document_import_bp import doc_import_bp
+app.register_blueprint(doc_import_bp, url_prefix='/api/document')
+
+
+# ── 注册系统配置 Blueprint ────────────────────────────
+from admin_config_bp import bp as admin_config_bp
+app.register_blueprint(admin_config_bp)
+
+
+
+if __name__ == "__main__":
+    print("="*60)
+    print("Starting Bank KB API on port 5001...")
+    print(f"Retrieval mode: {RETRIEVAL_MODE}")
+    print(f"Engine status: {engine.get_status()}")
+    print("="*60)
+    app.run(host="0.0.0.0", port=5001, debug=False, threaded=True)
+
