@@ -21,11 +21,13 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.qiuniu.dao.DiffCacheDAO;
+import com.qiuniu.dao.DiffAiResultDAO;
 import com.qiuniu.dao.GitProjectDAO;
 import com.qiuniu.dao.GitTeamDAO;
 import com.qiuniu.dao.PromptAnalysisDAO;
 import com.qiuniu.dao.VersionComparisonDAO;
 import com.qiuniu.dao.IncidentCodeLinkDAO;
+import com.qiuniu.model.DiffAiResult;
 import com.qiuniu.model.GitProject;
 import com.qiuniu.model.PromptAnalysis;
 import com.qiuniu.model.User;
@@ -44,6 +46,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.FileAttribute;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import com.qiuniu.dao.DBUtil;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -72,6 +76,7 @@ extends HttpServlet {
     private VersionComparisonDAO vcDAO = new VersionComparisonDAO();
     private PromptAnalysisDAO promptDAO = new PromptAnalysisDAO();
     private DiffCacheDAO diffCacheDAO = new DiffCacheDAO();
+    private DiffAiResultDAO diffAiResultDAO = new DiffAiResultDAO();
     private AIModelClient aiClient = new AIModelClient();
     private Gson gson = new Gson();
 
@@ -82,6 +87,21 @@ extends HttpServlet {
         this.promptDAO.createTable();
         this.promptDAO.seedDefaultPrompts();
         this.diffCacheDAO.createTable();
+        this.diffAiResultDAO.createTable();
+    }
+
+    private String md5(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] hash = md.digest(input.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (byte b : hash) {
+                hex.append(String.format("%02x", b));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            return "";
+        }
     }
 
     protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
@@ -254,7 +274,6 @@ extends HttpServlet {
     }
 
     private void doAnalyzeDiff(HttpServletRequest request, HttpServletResponse response) throws IOException {
-        int maxLines;
         JsonObject req;
         StringBuilder body = new StringBuilder();
         try (BufferedReader r = request.getReader();){
@@ -275,10 +294,38 @@ extends HttpServlet {
         String versionName = this.getStr(req, "versionName");
         String baseBranch = this.getStr(req, "baseBranch");
         String compareBranch = this.getStr(req, "compareBranch");
+        boolean forceRefresh = "true".equalsIgnoreCase(this.getStr(req, "forceRefresh"));
+
         if (diff == null || diff.trim().isEmpty()) {
             this.sendError(response, 400, "diff \u5185\u5bb9\u4e0d\u80fd\u4e3a\u7a7a");
             return;
         }
+
+        String diffHash = this.md5(diff);
+        String safeProjectName = projectName != null ? projectName : "";
+        String safeBaseBranch = baseBranch != null ? baseBranch : "master";
+        String safeCompareBranch = compareBranch != null ? compareBranch : "";
+
+        // 查缓存
+        if (!forceRefresh) {
+            DiffAiResult cached = this.diffAiResultDAO.findByProjectAndBranches(safeProjectName, safeBaseBranch, safeCompareBranch);
+            if (cached != null && diffHash.equals(cached.getDiffHash())) {
+                System.out.println("[AiAnalysis] Cache hit for: " + safeProjectName + " " + safeBaseBranch + " -> " + safeCompareBranch);
+                JsonObject result = new JsonObject();
+                result.addProperty("analysis", cached.getAiAnalysis());
+                result.addProperty("incidentCheckResult", cached.getIncidentCheckResult() != null ? cached.getIncidentCheckResult() : "");
+                result.addProperty("fileType", cached.getFileType() != null ? cached.getFileType() : "");
+                result.addProperty("promptUsed", cached.getPromptUsed() != null ? cached.getPromptUsed() : "");
+                result.addProperty("projectName", safeProjectName);
+                result.addProperty("model", cached.getModelUsed() != null ? cached.getModelUsed() : "");
+                result.addProperty("cached", true);
+                result.addProperty("cachedAt", cached.getUpdatedAt() != null ? cached.getUpdatedAt().toString() : "");
+                this.sendSuccess(response, result);
+                return;
+            }
+        }
+
+        // 缓存未命中或强制刷新，走AI分析
         if (!this.aiClient.isEnabled()) {
             this.sendError(response, 503, "AI \u5206\u6790\u672a\u542f\u7528\uff0c\u8bf7\u5728 db.properties \u4e2d\u914d\u7f6e ai.api.key \u5e76\u8bbe\u7f6e ai.enabled=true");
             return;
@@ -293,9 +340,9 @@ extends HttpServlet {
             return;
         }
         JsonObject info = new JsonObject();
-        info.addProperty("projectName", projectName != null ? projectName : "");
+        info.addProperty("projectName", safeProjectName);
         String userPrompt = this.buildUserPrompt(tmpl.getUserPromptTemplate(), this.nullStr(versionName, "unknown"), this.nullStr(baseBranch, "master"), this.nullStr(compareBranch, "unknown"), diff, info);
-        int n = maxLines = tmpl.getMaxDiffLines() != null ? tmpl.getMaxDiffLines() : 300;
+        int maxLines = tmpl.getMaxDiffLines() != null ? tmpl.getMaxDiffLines() : 300;
         if (diff.split("\n").length > maxLines) {
             String[] lines = diff.split("\n");
             StringBuilder sb = new StringBuilder();
@@ -305,7 +352,7 @@ extends HttpServlet {
             sb.append("\n[... diff truncated, first ").append(maxLines).append(" lines ...]");
             userPrompt = this.buildUserPrompt(tmpl.getUserPromptTemplate(), this.nullStr(versionName, "unknown"), this.nullStr(baseBranch, "master"), this.nullStr(compareBranch, "unknown"), sb.toString(), info);
         }
-        System.out.println("[AiAnalysis] Analyzing: " + this.nullStr(projectName, "?") + " type=" + fileType);
+        System.out.println("[AiAnalysis] Analyzing (fresh): " + this.nullStr(projectName, "?") + " type=" + fileType);
         String analysis = this.aiClient.analyze(tmpl.getSystemPrompt(), userPrompt);
 
         // 历史事故风险检核
@@ -314,13 +361,37 @@ extends HttpServlet {
         IncidentCheckService.CheckResult checkResult = incidentChecker.checkCode(diff, filePaths, new java.util.ArrayList<>());
         String incidentCheckStr = formatCheckResult(checkResult);
 
+        // 持久化结果
+        DiffAiResult record = new DiffAiResult();
+        record.setProjectName(safeProjectName);
+        record.setBaseBranch(safeBaseBranch);
+        record.setCompareBranch(safeCompareBranch);
+        record.setDiffHash(diffHash);
+        record.setDiffContent(diff.length() > 65535 ? diff.substring(0, 65535) : diff); // 防止超长
+        record.setAiAnalysis(analysis != null ? analysis : "[AI \u672a\u8fd4\u56de\u6709\u6548\u5206\u6790\u7ed3\u679c]");
+        record.setIncidentCheckResult(incidentCheckStr);
+        record.setFileType(fileType);
+        record.setModelUsed(this.aiClient.getModel());
+        record.setPromptUsed(tmpl.getDisplayName());
+
+        DiffAiResult existing = this.diffAiResultDAO.findByProjectAndBranches(safeProjectName, safeBaseBranch, safeCompareBranch);
+        if (existing != null) {
+            record.setId(existing.getId());
+            this.diffAiResultDAO.update(record);
+            System.out.println("[AiAnalysis] Updated cache: " + safeProjectName);
+        } else {
+            this.diffAiResultDAO.save(record);
+            System.out.println("[AiAnalysis] Saved cache: " + safeProjectName);
+        }
+
         JsonObject result = new JsonObject();
         result.addProperty("analysis", analysis != null ? analysis : "[AI \u672a\u8fd4\u56de\u6709\u6548\u5206\u6790\u7ed3\u679c]");
         result.addProperty("incidentCheckResult", incidentCheckStr != null ? incidentCheckStr : "");
         result.addProperty("fileType", fileType);
         result.addProperty("promptUsed", tmpl.getDisplayName());
-        result.addProperty("projectName", this.nullStr(projectName, ""));
+        result.addProperty("projectName", safeProjectName);
         result.addProperty("model", this.aiClient.getModel());
+        result.addProperty("cached", false);
         this.sendSuccess(response, result);
     }
 

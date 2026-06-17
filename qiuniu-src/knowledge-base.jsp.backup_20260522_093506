@@ -1,0 +1,1446 @@
+﻿<%@ page contentType="text/html;charset=UTF-8" language="java" %>
+<%@ page import="com.qiuniu.model.User" %>
+<%@ page import="com.qiuniu.dao.KnowledgeBaseDAO" %>
+<%@ page import="com.qiuniu.model.KnowledgeEntry" %>
+<%@ page import="com.qiuniu.model.Role" %>
+<%@ page import="java.util.List" %>
+<%
+    User user = (User) session.getAttribute("user");
+    if (user == null) {
+        response.sendRedirect(request.getContextPath() + "/login.jsp");
+        return;
+    }
+    List<KnowledgeEntry> entries = null;
+    List<String> categories = null;
+    try {
+        entries = KnowledgeBaseDAO.getAll();
+        categories = KnowledgeBaseDAO.getCategories();
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+    boolean isAdmin = "ADMIN".equals(user.getRole().getCode());
+    boolean canWrite = user.getRole() == Role.ADMIN || user.getRole() == Role.TEAM_ADMIN;
+%>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>囚牛 · 知识库</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: '"Microsoft YaHei"', Arial, sans-serif;
+            background: #f0f2f8;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ===== Header ===== */
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+        }
+        .header h1 { font-size: 20px; }
+        .header .right { display: flex; align-items: center; gap: 12px; }
+        .header a { color: rgba(255,255,255,0.85); text-decoration: none; font-size: 14px; }
+        .header a:hover { color: white; }
+        .header .divider { opacity: 0.4; }
+
+        /* ===== Main layout ===== */
+        .main {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            gap: 0;
+        }
+
+        /* ===== Left: Chat Panel ===== */
+        .chat-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #e0e4f0;
+            min-width: 0;
+        }
+        .chat-header {
+            padding: 14px 20px;
+            background: white;
+            border-bottom: 1px solid #e8ecf4;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .chat-header .bot-avatar {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid #667eea;
+        }
+        .chat-header .bot-info .bot-name { font-size: 15px; font-weight: 600; color: #333; }
+        .chat-header .bot-info .bot-status { font-size: 12px; color: #52c41a; }
+        .chat-header .bot-info .bot-status::before {
+            content: '';
+            display: inline-block;
+            width: 7px; height: 7px;
+            background: #52c41a;
+            border-radius: 50%;
+            margin-right: 4px;
+            vertical-align: middle;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            background: #f7f8fc;
+        }
+        .msg { display: flex; gap: 10px; max-width: 85%; }
+        .msg.user { align-self: flex-end; flex-direction: row-reverse; }
+        .msg-avatar {
+            width: 34px; height: 34px;
+            border-radius: 50%;
+            object-fit: cover;
+            flex-shrink: 0;
+            align-self: flex-end;
+        }
+        .msg.user .msg-avatar { order: 1; }
+        .msg-content {
+            background: white;
+            border-radius: 12px;
+            padding: 10px 14px;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #333;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+            word-break: break-word;
+        }
+        .msg.user .msg-content {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+        .msg:not(.user) .msg-content {
+            border-bottom-left-radius: 4px;
+        }
+        .msg.typing .msg-content {
+            color: #999;
+            font-style: italic;
+        }
+
+        .chat-input-area {
+            padding: 14px 16px;
+            background: white;
+            border-top: 1px solid #e8ecf4;
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+        .chat-input {
+            flex: 1;
+            border: 1.5px solid #e0e4f0;
+            border-radius: 22px;
+            padding: 10px 16px;
+            font-size: 14px;
+            outline: none;
+            resize: none;
+            font-family: inherit;
+            max-height: 120px;
+            transition: border-color 0.2s;
+        }
+        .chat-input:focus { border-color: #667eea; }
+        .btn-send {
+            width: 42px; height: 42px;
+            border-radius: 50%;
+            border: none;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            font-size: 18px;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+            transition: opacity 0.2s;
+        }
+        .btn-send:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-send:hover:not(:disabled) { opacity: 0.9; }
+
+        /* ===== Right: Knowledge Base Management ===== */
+        .kb-panel {
+            width: 380px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            background: white;
+            overflow: hidden;
+        }
+        .kb-header {
+            padding: 14px 18px;
+            border-bottom: 1px solid #e8ecf4;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .kb-header h2 { font-size: 15px; color: #333; }
+        .btn-add {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 6px 14px;
+            font-size: 13px;
+            cursor: pointer;
+            display: <%= isAdmin ? "inline" : "none" %>;
+        }
+        .btn-add:hover { opacity: 0.9; }
+
+        .kb-filters {
+            padding: 10px 18px;
+            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .filter-tag {
+            padding: 3px 10px;
+            border-radius: 20px;
+            border: 1px solid #e0e4f0;
+            font-size: 12px;
+            cursor: pointer;
+            color: #666;
+            background: white;
+        }
+        .filter-tag.active, .filter-tag:hover {
+            background: #667eea22;
+            border-color: #667eea;
+            color: #667eea;
+        }
+
+        .kb-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px 0;
+        }
+        .kb-item {
+            padding: 12px 18px;
+            border-bottom: 1px solid #f5f5f5;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .kb-item:hover { background: #f7f8fc; }
+        .kb-item.disabled { opacity: 0.45; }
+        .kb-item-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 4px;
+        }
+        .kb-item-q {
+            font-size: 13px;
+            font-weight: 600;
+            color: #333;
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-right: 8px;
+        }
+        .kb-item-cat {
+            font-size: 11px;
+            background: #667eea18;
+            color: #667eea;
+            padding: 1px 7px;
+            border-radius: 10px;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .kb-item-a {
+            font-size: 12px;
+            color: #888;
+            line-height: 1.5;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .kb-item-actions {
+            display: none;
+            margin-top: 6px;
+            gap: 6px;
+        }
+        <%= isAdmin ? ".kb-item:hover .kb-item-actions { display: flex; }" : "" %>
+        .btn-kb-edit, .btn-kb-del {
+            font-size: 12px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+        }
+        .btn-kb-edit { background: #e6f7ff; color: #1890ff; }
+        .btn-kb-del { background: #fff1f0; color: #ff4d4f; }
+
+        /* ===== Modal ===== */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.4);
+            z-index: 999;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal {
+            background: white;
+            border-radius: 14px;
+            padding: 28px;
+            width: 480px;
+            max-width: 90vw;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+        }
+        .modal h3 { font-size: 17px; color: #333; margin-bottom: 18px; }
+        .modal .field { margin-bottom: 14px; }
+        .modal label { display: block; font-size: 13px; color: #666; margin-bottom: 5px; }
+        .modal input, .modal select, .modal textarea {
+            width: 100%;
+            border: 1.5px solid #e0e4f0;
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 13px;
+            font-family: inherit;
+            outline: none;
+            box-sizing: border-box;
+        }
+        .modal input:focus, .modal select:focus, .modal textarea:focus {
+            border-color: #667eea;
+        }
+        .modal textarea { resize: vertical; min-height: 80px; }
+        .modal .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+        .modal .btn-cancel {
+            padding: 8px 20px;
+            border-radius: 8px;
+            border: 1.5px solid #e0e4f0;
+            background: white;
+            color: #666;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .modal .btn-submit {
+            padding: 8px 20px;
+            border-radius: 8px;
+            border: none;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        /* ===== Scrollbar ===== */
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #d0d5e8; border-radius: 3px; }
+
+        /* ===== Back link ===== */
+        .back-link {
+            padding: 10px 20px;
+            background: white;
+            border-bottom: 1px solid #e8ecf4;
+        }
+        .back-link a { font-size: 13px; color: #667eea; text-decoration: none; }
+        .back-link a:hover { text-decoration: underline; }
+    
+        /* Avatar mood overlay */
+        .avatar-mood-wrap {
+            position: relative;
+            display: inline-block;
+        }
+        .avatar-mood-wrap .mood-overlay {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        .avatar-mood-wrap .mood-overlay.active {
+            opacity: 1;
+        }
+
+        .btn-clear-chat {
+            background: none;
+            border: none;
+            font-size: 16px;
+            cursor: pointer;
+            opacity: 0.5;
+            margin-left: auto;
+            padding: 4px 8px;
+        }
+        .btn-clear-chat:hover { opacity: 1; }
+
+        /* Import Modal Tabs */
+        .import-tab {
+            padding: 6px 16px;
+            border: 1px solid #e0e4f0;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            color: #666;
+        }
+        .import-tab.active {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border-color: transparent;
+        }
+        .import-tab:hover:not(.active) {
+            border-color: #667eea;
+            color: #667eea;
+        }
+
+        /* ===== Character Selector ===== */
+        .character-selector {
+            padding: 10px 16px;
+            background: white;
+            border-bottom: 1px solid #e8ecf4;
+            display: flex;
+            gap: 12px;
+            overflow-x: auto;
+            flex-shrink: 0;
+        }
+        .character-card {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            border: 2px solid #e0e4f0;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+        .character-card:hover {
+            border-color: #667eea;
+            background: #f7f8fc;
+        }
+        .character-card.active {
+            border-color: #667eea;
+            background: linear-gradient(135deg, #667eea15, #764ba215);
+            box-shadow: 0 2px 8px rgba(102,126,234,0.2);
+        }
+        .character-card .char-avatar {
+            width: 42px; height: 42px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 1.5px solid #e0e4f0;
+        }
+        .character-card.active .char-avatar {
+            border-color: #667eea;
+        }
+        .character-card .char-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: #333;
+        }
+        .character-card .char-title {
+            font-size: 11px;
+            color: #999;
+        }
+        .character-card .char-info {
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ===== Unanswered Panel ===== */
+        .unanswered-panel {
+            padding: 12px 16px;
+            border-bottom: 1px solid #e8ecf4;
+            background: white;
+        }
+        .unanswered-panel h3 {
+            font-size: 14px;
+            color: #333;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .unanswered-panel .badge {
+            background: #ff4d4f;
+            color: white;
+            font-size: 11px;
+            padding: 1px 6px;
+            border-radius: 10px;
+        }
+        .unanswered-item {
+            padding: 8px 10px;
+            border: 1px solid #f0f0f0;
+            border-radius: 6px;
+            margin-bottom: 6px;
+            font-size: 12px;
+        }
+        .unanswered-item .uq-question {
+            color: #333;
+            margin-bottom: 4px;
+        }
+        .unanswered-item .uq-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .unanswered-item .uq-time { color: #999; font-size: 11px; }
+        .unanswered-item .uq-actions { display: flex; gap: 4px; }
+        .unanswered-item .btn-uq {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+        }
+        .btn-uq-answer { background: #e6f7ff; color: #1890ff; }
+        .btn-uq-ignore { background: #f5f5f5; color: #999; }
+        .btn-uq-answer:hover { background: #bae7ff; }
+        .btn-uq-ignore:hover { background: #e8e8e8; }
+        /* ===== Document Import Modal ===== */
+        .doc-import-modal .upload-area {
+            border: 2px dashed #d0d5e8;
+            border-radius: 12px;
+            padding: 40px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: #f7f8fc;
+            margin-bottom: 16px;
+        }
+        .doc-import-modal .upload-area:hover,
+        .doc-import-modal .upload-area.dragover {
+            border-color: #667eea;
+            background: #f0f2f8;
+        }
+        .doc-import-modal .upload-icon { font-size: 48px; margin-bottom: 12px; }
+        .doc-import-modal .upload-text { font-size: 14px; color: #666; }
+        .doc-import-modal .upload-hint { font-size: 12px; color: #999; margin-top: 6px; }
+        .doc-import-modal .file-list { margin-top: 16px; text-align: left; }
+        .doc-import-modal .file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 14px;
+            border: 1px solid #e8ecf4;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+        .doc-import-modal .file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .doc-import-modal .file-size { color: #999; margin-left: 8px; }
+        .doc-import-modal .file-remove {
+            color: #ff4d4f;
+            cursor: pointer;
+            margin-left: 8px;
+            font-size: 16px;
+        }
+        .doc-import-modal .progress-wrap { margin-top: 12px; display: none; }
+        .doc-import-modal .progress-bar {
+            height: 6px;
+            background: #e8ecf4;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .doc-import-modal .progress-fill {
+            height: 100%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s;
+        }
+        .doc-import-modal .progress-text { font-size: 12px; color: #999; margin-top: 4px; }
+        .doc-import-modal .preview-area {
+            margin-top: 16px;
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #e8ecf4;
+            border-radius: 8px;
+            padding: 12px;
+            background: #f7f8fc;
+            display: none;
+        }
+        .doc-import-modal .preview-item {
+            padding: 8px 10px;
+            border-bottom: 1px solid #eee;
+            font-size: 12px;
+            color: #333;
+        }
+        .doc-import-modal .preview-item:last-child { border-bottom: none; }
+
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>📚 知识库</h1>
+    <div class="right">
+        <span style="font-size:14px;opacity:0.9"><%= user.getNickname() %></span>
+        <span class="divider">|</span>
+        <a href="${pageContext.request.contextPath}/home.jsp">功能中心</a>
+        <a href="${pageContext.request.contextPath}/dashboard.jsp">版本管理</a>
+        <a href="${pageContext.request.contextPath}/logout">退出</a>
+    
+        <span class="divider">|</span>
+        <a href="${pageContext.request.contextPath}/employee/employee-login.jsp" class="emp-login-link" id="empLoginLink">员工登录</a>
+        <div class="emp-area" id="empArea" style="display:none" onclick="location.href='${pageContext.request.contextPath}/employee/portal'">
+            <img class="emp-avatar" id="empHeaderAvatar" src="" alt="头像">
+            <span class="emp-name" id="empHeaderName"></span>
+        </div>
+
+    </div>
+</div>
+
+<div class="main">
+
+    <!-- ===== Left: Chat ===== -->
+    <div class="chat-panel">
+        <div class="chat-header">
+            <div class="avatar-mood-wrap" style="width:48px;height:48px;border-radius:50%;overflow:hidden;position:relative;flex-shrink:0;background:transparent">
+                <img src="${pageContext.request.contextPath}/images/avatar/avatar_base.jpg" class="bot-avatar" alt="avatar"
+                     style="width:100%;height:100%;object-fit:cover;border-radius:50%">
+                <!-- Mood overlay SVG files -->
+                <img id="mood-thinking" class="mood-overlay" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_thinking.svg">
+                <img id="mood-happy" class="mood-overlay" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_happy.svg">
+                <img id="mood-neutral" class="mood-overlay active" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_neutral.svg">
+            </div>
+            <div class="bot-info">
+                <div class="bot-name">囚牛 AI 助手</div>
+                <div class="bot-status">基于知识库回答</div>
+            </div>
+            <button class="btn-clear-chat" onclick="clearChat()" title="清空对话">🗑️</button>
+        </div>
+
+        <!-- Character Selector -->
+        <div class="character-selector" id="characterSelector">
+            <!-- 由 renderCharacterSelector() 动态渲染 -->
+        </div>
+
+        <div class="chat-messages" id="chatMessages">
+            <div class="msg">
+                <img src="${pageContext.request.contextPath}/images/avatar/avatar_base.jpg" class="msg-avatar" alt="bot">
+                <div class="msg-content">👋 你好！我是囚牛 AI 助手，可以基于知识库回答你的问题。有什么想了解的？</div>
+            </div>
+        </div>
+
+        <div class="chat-input-area">
+            <textarea id="chatInput" class="chat-input" placeholder="输入问题，按 Enter 发送..." rows="1"
+                      onkeydown="handleKeyDown(event)"></textarea>
+            <button class="btn-send" id="btnSend" onclick="sendMessage()">➤</button>
+        </div>
+    </div>
+
+    <!-- ===== Right: Knowledge Base ===== -->
+    <div class="kb-panel">
+        <div class="kb-header">
+            <h2>📖 知识库条目</h2>
+            <div>
+                <% if (canWrite) { %>
+                <button class="btn-add" style="margin-right:8px" onclick="openImportModal()">📂 导入</button>
+                <button class="btn-add" style="margin-right:8px" onclick="openDocImportModal()">📄 文档导入</button>
+                <button class="btn-add" onclick="openModal()">+ 新增</button>
+                <% } %>
+            </div>
+        </div>
+        <div class="kb-filters" id="kbFilters">
+            <span class="filter-tag active" data-cat="">全部</span>
+        </div>
+        <div class="kb-list" id="kbList"></div>
+    </div>
+
+</div>
+
+<!-- ===== Modal ===== -->
+<div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+        <h3 id="modalTitle">新增知识条目</h3>
+        <input type="hidden" id="editId">
+        <div class="field">
+            <label>问题关键词（多个用 | 分隔）</label>
+            <input type="text" id="fQuestion" placeholder="如：项目介绍|什么是囚牛">
+        </div>
+        <div class="field">
+            <label>回答内容</label>
+            <textarea id="fAnswer" placeholder="输入标准回答..."></textarea>
+        </div>
+        <div class="field">
+            <label>分类</label>
+            <input type="text" id="fCategory" placeholder="如：项目介绍" list="catList">
+            <datalist id="catList">
+                <% if(categories != null) for(String c : categories) { %>
+                <option value="<%= c %>">
+                <% } %>
+            </datalist>
+        </div>
+        <div class="actions">
+            <button class="btn-cancel" onclick="closeModal()">取消</button>
+            <button class="btn-submit" onclick="submitEntry()">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===== Import Modal ===== -->
+<div class="modal-overlay" id="importModalOverlay" onclick="if(event.target===this)closeImportModal()">
+    <div class="modal" style="width:520px">
+        <h3>导入知识条目</h3>
+        <div class="import-tabs" style="display:flex;gap:10px;margin-bottom:16px">
+            <button class="import-tab active" onclick="setImportMode('json')" id="tabJson">粘贴 JSON</button>
+            <button class="import-tab" onclick="setImportMode('file')" id="tabFile">上传文件</button>
+        </div>
+        <div id="importJsonArea">
+            <div class="field">
+                <label>JSON 格式（数组）</label>
+                <textarea id="importJson" style="min-height:140px;font-size:12px" placeholder='[{"question":"问题1","answer":"回答1","category":"分类"},{"question":"问题2","answer":"回答2"}]'></textarea>
+            </div>
+            <p style="font-size:11px;color:#888;margin-bottom:12px">💡 每条需包含 question 和 answer，category 可选</p>
+        </div>
+        <div id="importFileArea" style="display:none">
+            <div class="field">
+                <label>选择文件（TXT / MD）</label>
+                <input type="file" id="importFile" accept=".txt,.md,.docx" multiple style="font-size:13px">
+            </div>
+            <p style="font-size:11px;color:#888;margin-bottom:12px">💡 文件内容将按段落拆分为多条知识，每个段落首 80 字作问题关键词</p>
+        </div>
+        <div class="field">
+            <label>默认分类</label>
+            <input type="text" id="importCategory" placeholder="如：导入文档" value="导入文档">
+        </div>
+        <div class="actions">
+            <button class="btn-cancel" onclick="closeImportModal()">取消</button>
+            <button class="btn-submit" onclick="doImport()">导入</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const API = 'http://localhost:5001/api';
+const KB_API = '${pageContext.request.contextPath}/api/knowledge-base';
+const CAN_WRITE = <%= canWrite %>;
+const IS_ADMIN = <%= isAdmin %>;
+let kbData = [];
+let currentFilter = '';
+let isSending = false;
+let canWrite = CAN_WRITE;
+
+const avatarFallback = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><circle cx="20" cy="20" r="20" fill="#667eea"/><text x="20" y="26" text-anchor="middle" fill="white" font-size="18">🐉</text></svg>');
+
+// ===== Character State =====
+let characters = [];
+let currentCharacterId = parseInt(localStorage.getItem('selectedCharacterId')) || null;
+let currentCharacter = null;
+
+// Load characters from API
+async function loadCharacters() {
+    try {
+        const resp = await fetch(API + '/characters', { credentials: 'same-origin' });
+        characters = await resp.json();
+        renderCharacterSelector();
+        // Select saved character or default to first
+        if (!characters.find(c => c.id === currentCharacterId)) {
+            currentCharacterId = characters.length > 0 ? characters[0].id : null;
+        }
+        selectCharacter(currentCharacterId, false);
+    } catch(e) {
+        console.error('Failed to load characters:', e);
+        currentCharacter = null;
+        currentCharacterId = null;
+        console.warn('角色列表加载失败，使用默认角色');
+    }
+}
+
+function renderCharacterSelector() {
+    const container = document.getElementById('characterSelector');
+    if (!container || characters.length === 0) return;
+
+    container.innerHTML = characters.map(c => {
+        const avatarSrc = c.avatar && !c.avatar.startsWith('http') && !c.avatar.startsWith('data:')
+            ? '${pageContext.request.contextPath}' + c.avatar
+            : (c.avatar || '${pageContext.request.contextPath}/images/avatar/avatar_base.jpg');
+        const activeClass = c.id === currentCharacterId ? ' active' : '';
+        return '<div class="character-card' + activeClass + '" data-id="' + c.id + '" onclick="selectCharacter(' + c.id + ')">' +
+            '<img src="' + avatarSrc + '" class="char-avatar" onerror="this.src=avatarFallback">' +
+            '<div class="char-info">' +
+                '<span class="char-name">' + jsEscape(c.name) + '</span>' +
+                '<span class="char-title">' + jsEscape(c.title || '') + '</span>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+}
+
+function selectCharacter(id, clearChatFlag) {
+    const char = characters.find(c => c.id === id);
+    if (!char) return;
+
+    currentCharacterId = id;
+    currentCharacter = char;
+    localStorage.setItem('selectedCharacterId', id);
+
+    // Update selector UI
+    document.querySelectorAll('.character-card').forEach(el => {
+        el.classList.toggle('active', parseInt(el.dataset.id) === id);
+    });
+
+    // Update bot name in header
+    const botName = document.querySelector('.bot-info .bot-name');
+    if (botName) botName.textContent = char.name + ' AI 助手';
+
+    // Update bot status
+    const botStatus = document.querySelector('.bot-info .bot-status');
+    if (botStatus) botStatus.textContent = char.title || '基于知识库回答';
+
+    // Update header avatar
+    const headerAvatar = document.querySelector('.chat-header .bot-avatar');
+    if (headerAvatar) {
+        const avatarSrc = char.avatar && !char.avatar.startsWith('http') && !char.avatar.startsWith('data:')
+            ? '${pageContext.request.contextPath}' + char.avatar
+            : '${pageContext.request.contextPath}/images/avatar/avatar_base.jpg';
+        headerAvatar.src = avatarSrc;
+        headerAvatar.onerror = function() { this.src = avatarFallback; };
+    }
+
+    // Clear chat on character switch (avoid context confusion)
+    if (clearChatFlag !== false) {
+        clearChatSilent();
+        const container = document.getElementById('chatMessages');
+        container.innerHTML = '';
+        appendMsg('bot', '👋 你好！我是' + jsEscape(char.name) + '，' + (char.description || '可以基于知识库回答你的问题') + '。有什么想了解的？');
+    }
+}
+
+function clearChatSilent() {
+    fetch(API + '/clear', { method: 'POST', credentials: 'same-origin' }).catch(function(){});
+}
+
+function getBotAvatar() {
+    return '${pageContext.request.contextPath}/images/avatar/avatar_base.jpg?t=' + Date.now();
+}
+
+// Load knowledge base list
+async function loadKB() {
+    try {
+        const r = await fetch(KB_API + '/list', { credentials: 'same-origin' });
+        const data = await r.json();
+        kbData = data.entries || [];
+        renderKB();
+        renderFilters();
+    } catch(e) { console.error('KB load error', e); }
+}
+
+// Build bot avatar URL with timestamp to bust cache
+function botAvatarUrl() {
+    return '${pageContext.request.contextPath}/images/avatar/avatar_base.jpg?t=' + Date.now();
+}
+
+function renderKB() {
+    const list = document.getElementById('kbList');
+    const filtered = currentFilter ? kbData.filter(e => e.category === currentFilter) : kbData;
+    if (filtered.length === 0) {
+        list.innerHTML = '<div style="text-align:center;padding:40px 0;color:#ccc;font-size:14px">暂无知识条目</div>';
+        return;
+    }
+    list.innerHTML = filtered.map(e => {
+        const q = jsEscape(e.question.split('|')[0]);
+        const a = jsEscape(e.answer);
+        const c = jsEscape(e.category || '通用');
+        const cls = (e.enabled ? '' : ' disabled');
+        return '<div class="kb-item ' + cls + '" onclick="askQuestion(\'' + q + '\')">' +
+            '<div class="kb-item-top">' +
+                '<span class="kb-item-q">' + q + '</span>' +
+                '<span class="kb-item-cat">' + c + '</span>' +
+            '</div>' +
+            '<div class="kb-item-a">' + a + '</div>' +
+            (canWrite ? '<div class="kb-item-actions">' +
+                '<button class="btn-kb-edit" onclick="event.stopPropagation();editEntry(' + e.id + ')">编辑</button>' +
+                '<button class="btn-kb-del" onclick="event.stopPropagation();deleteEntry(' + e.id + ')">删除</button>' +
+            '</div>' : '') +
+        '</div>';
+    }).join('');
+}
+
+function renderFilters() {
+    const cats = [...new Set(kbData.map(e => e.category).filter(Boolean))];
+    const filters = document.getElementById('kbFilters');
+    filters.innerHTML = '<span class="filter-tag' + (currentFilter===''?' active':'') + '" data-cat="" onclick="setFilter(\'\')">全部</span>' +
+        cats.map(c => '<span class="filter-tag' + (currentFilter===c?' active':'') + '" data-cat="' + jsEscape(c) + '" onclick="setFilter(\'' + jsEscape(c) + '\')">' + jsEscape(c) + '</span>').join('');
+}
+
+function setFilter(cat) {
+    currentFilter = cat;
+    renderKB();
+    renderFilters();
+}
+
+function htmlEscape(s) {
+    if (!s) return '';
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function jsEscape(s) {
+    if (!s) return '';
+    return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+}
+
+function linkifyForBot(text) {
+    text = htmlEscape(text);
+    const urlPattern = /(https?:\/\/[^\s<]+)/g;
+    return text.replace(urlPattern, '<a href="$1" target="_blank" style="color:#667eea">$1</a>').replace(/\n/g, '<br>');
+}
+
+// Click a KB item to ask about it
+function askQuestion(q) {
+    document.getElementById('chatInput').value = q;
+    sendMessage();
+}
+
+// ===== Chat =====
+
+function handleKeyDown(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+    }
+}
+
+async function sendMessage() {
+    // 检查是否已选择角色
+    if (!currentCharacterId) {
+        alert('请先选择一个角色');
+        return;
+    }
+    const input = document.getElementById('chatInput');
+    const msg = input.value.trim();
+    if (!msg || isSending) return;
+
+    input.value = '';
+    isSending = true;
+    document.getElementById('btnSend').disabled = true;
+
+    // Append user message
+    appendMsg('user', msg);
+
+    // Append typing indicator & set avatar thinking
+    setAvatarMood('thinking');
+    const typingId = 'typing-' + Date.now();
+    appendMsg('typing', '', typingId);
+
+    try {
+        const resp = await fetch(API + '/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: msg, character_id: currentCharacterId }),
+            credentials: 'same-origin'
+        });
+        const data = await resp.json();
+        removeMsg(typingId);
+        if (data.error) {
+            appendMsg('bot', '❌ ' + data.error);
+            setAvatarMood('default');
+    } else {
+        appendMsg('bot', data.answer || '（无回复）');
+        setAvatarMood('happy');
+        setTimeout(function() { setAvatarMood('default'); }, 2000);
+    }
+    } catch(e) {
+        removeMsg(typingId);
+        appendMsg('bot', '❌ 网络错误，请检查网络连接');
+        setAvatarMood('default');
+    } finally {
+        isSending = false;
+        document.getElementById('btnSend').disabled = false;
+    }
+}
+
+function appendMsg(role, text, id) {
+    const container = document.getElementById('chatMessages');
+    const div = document.createElement('div');
+    const isBot = role !== 'user';
+    div.className = 'msg' + (role === 'typing' ? ' typing' : (isBot ? '' : ' user'));
+    if (id) div.id = id;
+
+    if (role === 'typing') {
+        // 思考中：显示 thinking 叠加层
+        div.innerHTML = `
+            <div class="chat-avatar-container" style="position:relative;width:36px;height:36px;border-radius:50%;overflow:hidden;flex-shrink:0;background:transparent;">
+                <img src="${pageContext.request.contextPath}/images/avatar/avatar_base.jpg" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">
+                <img class="mood-overlay thinking active" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_thinking.svg" style="position:absolute;top:0;left:0;width:100%;height:100%;">
+                <img class="mood-overlay happy" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_happy.svg" style="position:absolute;top:0;left:0;width:100%;height:100%;display:none;">
+                <img class="mood-overlay neutral" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_neutral.svg" style="position:absolute;top:0;left:0;width:100%;height:100%;display:none;">
+            </div>
+            <div class="msg-content">正在思考...</div>`;
+    } else if (role === 'user') {
+        div.innerHTML = `
+            <img src="${pageContext.request.contextPath}/user-avatar.jsp" class="msg-avatar" alt="you"
+                 onerror="this.src='data:image/svg+xml,${'$'}{encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><circle cx="20" cy="20" r="20" fill="#764ba2"/><text x="20" y="26" text-anchor="middle" fill="white" font-size="16">👤</text></svg>')}'">
+            <div class="msg-content">${'$'}{linkifyUser(text)}</div>`;
+    } else {
+        // bot 消息：默认不激活任何叠加层，等待 setAvatarMood 更新
+        div.innerHTML = `
+            <div class="chat-avatar-container" style="position:relative;width:36px;height:36px;border-radius:50%;overflow:hidden;flex-shrink:0;background:transparent;">
+                <img src="${pageContext.request.contextPath}/images/avatar/avatar_base.jpg" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">
+                <img class="mood-overlay thinking" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_thinking.svg" style="position:absolute;top:0;left:0;width:100%;height:100%;display:none;">
+                <img class="mood-overlay happy" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_happy.svg" style="position:absolute;top:0;left:0;width:100%;height:100%;display:none;">
+                <img class="mood-overlay neutral" src="${pageContext.request.contextPath}/images/avatar/avatar_photo_neutral.svg" style="position:absolute;top:0;left:0;width:100%;height:100%;display:none;">
+            </div>
+            <div class="msg-content">${'$'}{linkifyForBot(text)}</div>`;
+    }
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+}
+
+function removeMsg(id) {
+    const el = document.getElementById(id);
+    if (el) el.remove();
+}
+
+function linkifyUser(text) {
+    text = jsEscape(text);
+    const urlPattern = /(https?:\/\/[^\s<]+)/g;
+    return text.replace(urlPattern, '<a href="$1" target="_blank" style="color:#667eea">$1</a>');
+}
+
+// ===== KB CRUD =====
+
+function openModal(id) {
+    document.getElementById('modalOverlay').classList.add('show');
+    document.getElementById('editId').value = id || '';
+    document.getElementById('modalTitle').textContent = id ? '编辑知识条目' : '新增知识条目';
+    if (!id) {
+        document.getElementById('fQuestion').value = '';
+        document.getElementById('fAnswer').value = '';
+        document.getElementById('fCategory').value = '';
+    }
+}
+
+function editEntry(id) {
+    const e = kbData.find(x => x.id === id);
+    if (!e) return;
+    openModal(id);
+    document.getElementById('fQuestion').value = e.question;
+    document.getElementById('fAnswer').value = e.answer;
+    document.getElementById('fCategory').value = e.category || '';
+}
+
+function closeModal() {
+    document.getElementById('modalOverlay').classList.remove('show');
+}
+
+async function submitEntry() {
+    const id = document.getElementById('editId').value;
+    const question = document.getElementById('fQuestion').value.trim();
+    const answer = document.getElementById('fAnswer').value.trim();
+    const category = document.getElementById('fCategory').value.trim() || '通用';
+
+    if (!question || !answer) { alert('请填写问题和回答'); return; }
+
+    const body = new URLSearchParams({ question, answer, category });
+    const url = id ? KB_API + '/update' + '?id=' + id : KB_API + '/add';
+
+    try {
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString(),
+            credentials: 'same-origin'
+        });
+        if (resp.ok) {
+            closeModal();
+            loadKB();
+        } else {
+            const data = await resp.json();
+            alert('保存失败: ' + (data.error || '未知错误'));
+        }
+    } catch(e) { alert('保存失败: ' + e.message); }
+}
+
+async function deleteEntry(id) {
+    if (!confirm('确定删除该知识条目？')) return;
+    try {
+        await fetch(KB_API + '/delete?id=' + id, {
+            method: 'POST',
+            credentials: 'same-origin'
+        });
+        loadKB();
+    } catch(e) { alert('删除失败: ' + e.message); }
+}
+
+// Init
+loadKB();
+loadCharacters();
+loadChatHistory();
+<% if (isAdmin) { %>
+loadUnansweredQuestions();
+<% } %>
+
+// ===== Chat History =====
+
+async function loadChatHistory() {
+    try {
+        const resp = await fetch(API + '/history', { credentials: 'same-origin' });
+        const data = await resp.json();
+        const history = data.history || [];
+        const container = document.getElementById('chatMessages');
+        // Remove only the welcome message, keep structure
+        container.innerHTML = '';
+        history.forEach(function(h) {
+            appendMsg(h.role === 'user' ? 'user' : 'bot', h.content);
+        });
+        // If no history, show welcome
+        if (history.length === 0) {
+            appendMsg('bot', '\ud83d\udc4b 你好！我是囚牛 AI 助手，可以基于知识库回答你的问题。有什么想了解的？');
+        }
+    } catch(e) { console.error('History load error', e); }
+}
+
+async function clearChat() {
+    if (!confirm('确定清空对话记录？')) return;
+    try {
+        await fetch(API + '/clear', { method: 'POST', credentials: 'same-origin' });
+        const container = document.getElementById('chatMessages');
+        container.innerHTML = '';
+        appendMsg('bot', '\ud83d\udc4b 对话已清空，有什么想了解的？');
+    } catch(e) { alert('清空失败: ' + e.message); }
+}
+
+    function setAvatarMood(mood) {
+        // 更新头部大头像
+        var overlays = document.querySelectorAll('.mood-overlay');
+        overlays.forEach(function(el) { el.classList.remove('active'); el.style.display = 'none'; });
+        if (mood && mood !== 'default') {
+            var target = document.getElementById('mood-' + mood);
+            if (target) { target.classList.add('active'); target.style.display = 'block'; }
+        } else {
+            // default = show neutral overlay
+            var neutral = document.getElementById('mood-neutral');
+            if (neutral) { neutral.classList.add('active'); neutral.style.display = 'block'; }
+        }
+        // 更新对话框里的小头像
+        var moodToShow = (mood && mood !== 'default') ? mood : 'neutral';
+        var chatContainers = document.querySelectorAll('.chat-avatar-container');
+        chatContainers.forEach(function(container) {
+            var overlays = container.querySelectorAll('.mood-overlay');
+            overlays.forEach(function(el) { el.classList.remove('active'); el.style.display = 'none'; });
+            var activeOverlay = container.querySelector('.mood-overlay.' + moodToShow);
+            if (activeOverlay) { activeOverlay.classList.add('active'); activeOverlay.style.display = 'block'; }
+        });
+    }
+
+// ===== Unanswered Questions (Admin) =====
+async function loadUnansweredQuestions() {
+    try {
+        const resp = await fetch(API + '/unanswered?status=pending&page_size=10', { credentials: 'same-origin' });
+        const data = await resp.json();
+        const items = data.items || [];
+        const total = data.total || 0;
+
+        // Show badge on kb-header if there are pending questions
+        const kbHeader = document.querySelector('.kb-header h2');
+        if (kbHeader && total > 0) {
+            kbHeader.innerHTML = '📖 知识库条目 <span class="badge" style="background:#ff4d4f;color:white;font-size:11px;padding:1px 6px;border-radius:10px;margin-left:4px">' + total + ' 待答</span>';
+        }
+    } catch(e) { console.error('Unanswered load error:', e); }
+}
+
+async function submitAnswer(uqId) {
+    const answer = prompt('请输入回答内容：');
+    if (!answer || !answer.trim()) return;
+    try {
+        const resp = await fetch(API + '/unanswered/' + uqId + '/answer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ answer: answer.trim() }),
+            credentials: 'same-origin'
+        });
+        if (resp.status === 409) {
+            alert('该问题已被其他同事处理');
+        } else if (resp.ok) {
+            loadUnansweredQuestions();
+        } else {
+            alert('操作失败');
+        }
+    } catch(e) { alert('操作失败: ' + e.message); }
+}
+
+async function ignoreUnanswered(uqId) {
+    if (!confirm('确定忽略该问题？')) return;
+    try {
+        await fetch(API + '/unanswered/' + uqId + '/ignore', {
+            method: 'POST',
+            credentials: 'same-origin'
+        });
+        loadUnansweredQuestions();
+    } catch(e) { alert('操作失败: ' + e.message); }
+}
+
+// ===== Import Functions =====
+let importMode = 'json';
+
+function openImportModal() {
+    document.getElementById('importModalOverlay').classList.add('show');
+    document.getElementById('importJson').value = '';
+    document.getElementById('importFile').value = '';
+    setImportMode('json');
+}
+
+function closeImportModal() {
+    document.getElementById('importModalOverlay').classList.remove('show');
+}
+
+function setImportMode(mode) {
+    importMode = mode;
+    document.getElementById('tabJson').classList.toggle('active', mode === 'json');
+    document.getElementById('tabFile').classList.toggle('active', mode === 'file');
+    document.getElementById('importJsonArea').style.display = mode === 'json' ? 'block' : 'none';
+    document.getElementById('importFileArea').style.display = mode === 'file' ? 'block' : 'none';
+}
+
+async function doImport() {
+    const category = document.getElementById('importCategory').value.trim() || '导入文档';
+    if (importMode === 'json') {
+        const jsonText = document.getElementById('importJson').value.trim();
+        if (!jsonText) { alert('请输入 JSON 内容'); return; }
+        try {
+            const resp = await fetch(KB_API + '/import', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: jsonText,
+                credentials: 'same-origin'
+            });
+            const data = await resp.json();
+            if (data.ok) {
+                alert('成功导入 ' + (data.imported || 0) + ' 条'); closeImportModal(); loadKB();
+            } else {
+                alert('导入失败: ' + (data.error || '未知错误'));
+            }
+        } catch(e) { alert('导入失败: ' + e.message); }
+    } else {
+        const files = document.getElementById('importFile').files;
+        if (!files || files.length === 0) { alert('请选择文件'); return; }
+        const formData = new FormData();
+        for (const f of files) formData.append('file', f);
+        formData.append('category', category);
+        try {
+            const resp = await fetch(KB_API + '/import', {
+                method: 'POST',
+                body: formData,
+                credentials: 'same-origin'
+            });
+            const data = await resp.json();
+            if (data.ok) {
+                alert('成功导入 ' + (data.imported || 0) + ' 条\n' + (data.errors || '')); closeImportModal(); loadKB();
+            } else {
+                alert('导入失败: ' + (data.error || '未知错误'));
+            }
+        } catch(e) { alert('导入失败: ' + e.message); }
+    }
+}
+
+
+        // ===== Employee Header Logic =====
+        function checkEmployeeLogin() {
+            const empToken = localStorage.getItem('emp_token');
+            const empName = localStorage.getItem('emp_name');
+            const empAvatar = localStorage.getItem('emp_avatar');
+            const loginLink = document.getElementById('empLoginLink');
+            const empArea = document.getElementById('empArea');
+            const empHeaderAvatar = document.getElementById('empHeaderAvatar');
+            const empHeaderName = document.getElementById('empHeaderName');
+
+            if (empToken && empName) {
+                loginLink.style.display = 'none';
+                empArea.style.display = 'flex';
+                empHeaderName.textContent = empName;
+                if (empAvatar) {
+                    empHeaderAvatar.src = empAvatar;
+                    empHeaderAvatar.style.display = 'block';
+                }
+            }
+        }
+
+    </script>
+<!-- Document Import Modal -->
+<div class="modal-overlay doc-import-modal" id="docImportModal" onclick="if(event.target===this)closeDocImportModal()">
+    <div class="modal" style="width:620px;max-width:95vw;">
+        <h3>📄 文档导入</h3>
+        <div class="field">
+            <label>选择文件（支持 .docx / .pdf / .txt / .md）</label>
+            <div class="upload-area" id="docUploadArea">
+                <div class="upload-icon">📄</div>
+                <div class="upload-text">点击选择或拖拽文件到此处</div>
+                <div class="upload-hint">支持 .docx, .pdf, .txt, .md 格式</div>
+                <input type="file" id="docFileInput" multiple accept=".docx,.pdf,.txt,.md" style="display:none">
+            </div>
+        </div>
+        <div class="file-list" id="docFileList"></div>
+        <div class="field" style="margin-top:12px;">
+            <label>关联虚拟人物（可选）</label>
+            <select id="docCharacterId" style="width:100%;padding:8px 12px;border:1.5px solid #e0e4f0;border-radius:8px;font-size:13px;">
+                <option value="">不关联</option>
+            </select>
+        </div>
+        <div class="field" style="margin-top:12px;">
+            <label style="display:flex;align-items:center;cursor:pointer;">
+                <input type="checkbox" id="docPublishToKb" style="width:auto;margin-right:8px;">
+                <span style="font-weight:normal;font-size:13px;color:#555;">同步到公共知识库</span>
+            </label>
+        </div>
+        <div class="progress-wrap" id="docProgressWrap" style="display:none;">
+            <div class="progress-bar"><div class="progress-fill" id="docProgressFill"></div></div>
+            <div class="progress-text" id="docProgressText">准备中...</div>
+        </div>
+        <div class="preview-area" id="docPreviewArea"></div>
+        <div class="actions">
+            <button class="btn-cancel" onclick="closeDocImportModal()">取消</button>
+            <button class="btn-submit" id="btnDocImport" onclick="startDocImport()">开始导入</button>
+        </div>
+    </div>
+</div>
+
+    <script>
+    // ===== Document Import Modal =====
+    let docSelectedFiles = [];
+
+    function openDocImportModal() {
+        document.getElementById('docImportModal').classList.add('show');
+        document.getElementById('docFileList').innerHTML = '';
+        document.getElementById('docProgressWrap').style.display = 'none';
+        document.getElementById('docPreviewArea').style.display = 'none';
+        document.getElementById('docPreviewArea').innerHTML = '';
+        docSelectedFiles = [];
+        loadCharactersForDoc();
+    }
+
+    function closeDocImportModal() {
+        document.getElementById('docImportModal').classList.remove('show');
+    }
+
+    function loadCharactersForDoc() {
+        fetch(API + '/characters', { credentials: 'same-origin' })
+            .then(r => r.json())
+            .then(data => {
+                const sel = document.getElementById('docCharacterId');
+                data.forEach(c => {
+                    const opt = document.createElement('option');
+                    opt.value = c.id;
+                    opt.textContent = c.name + (c.title ? '（' + c.title + '）' : '');
+                    sel.appendChild(opt);
+                });
+            })
+            .catch(() => {});
+    }
+
+    // Upload area click & drag
+    const docUploadArea = document.getElementById('docUploadArea');
+    const docFileInput = document.getElementById('docFileInput');
+    docUploadArea.addEventListener('click', () => docFileInput.click());
+    docUploadArea.addEventListener('dragover', e => { e.preventDefault(); docUploadArea.classList.add('dragover'); });
+    docUploadArea.addEventListener('dragleave', () => docUploadArea.classList.remove('dragover'));
+    docUploadArea.addEventListener('drop', e => {
+        e.preventDefault();
+        docUploadArea.classList.remove('dragover');
+        handleDocFiles(e.dataTransfer.files);
+    });
+    docFileInput.addEventListener('change', e => handleDocFiles(e.target.files));
+
+    function handleDocFiles(files) {
+        for (const f of files) {
+            if (![ '.docx','.pdf','.txt','.md' ].some(ext => f.name.toLowerCase().endsWith(ext))) {
+                alert('不支持的文件类型：' + f.name);
+                continue;
+            }
+            docSelectedFiles.push(f);
+        }
+        renderDocFileList();
+    }
+
+    function renderDocFileList() {
+        const container = document.getElementById('docFileList');
+        container.innerHTML = '';
+        docSelectedFiles.forEach((f, i) => {
+            const div = document.createElement('div');
+            div.className = 'file-item';
+            div.innerHTML = '<span class="file-name">' + f.name + '</span>'
+                + '<span class="file-size">(' + (f.size/1024).toFixed(1) + ' KB)</span>'
+                + '<span class="file-remove" onclick="removeDocFile(' + i + ')">✕</span>';
+            container.appendChild(div);
+        });
+    }
+
+    function removeDocFile(index) {
+        docSelectedFiles.splice(index, 1);
+        renderDocFileList();
+    }
+
+    function startDocImport() {
+        if (docSelectedFiles.length === 0) { alert('请先选择文件'); return; }
+        document.getElementById('docProgressWrap').style.display = 'block';
+        document.getElementById('btnDocImport').disabled = true;
+        uploadDocFiles();
+    }
+
+    function uploadDocFiles() {
+        const fd = new FormData();
+        docSelectedFiles.forEach(f => fd.append('files', f));
+        const charId = document.getElementById('docCharacterId').value;
+        if (charId) fd.append('character_id', charId);
+        
+        const publishToKb = document.getElementById('docPublishToKb').checked;
+        if (publishToKb) fd.append('publish_to_kb', 'true');
+
+        const xhr = new XMLHttpRequest();
+        xhr.upload.addEventListener('progress', e => {
+            if (e.lengthComputable) {
+                const pct = Math.round(e.loaded / e.total * 100);
+                document.getElementById('docProgressFill').style.width = pct + '%';
+                document.getElementById('docProgressText').textContent = '上传中 ' + pct + '%';
+            }
+        });
+        xhr.addEventListener('load', () => {
+            if (xhr.status === 200) {
+                const resp = JSON.parse(xhr.responseText);
+                document.getElementById('docProgressFill').style.width = '100%';
+                document.getElementById('docProgressText').textContent = '导入成功！';
+                if (resp.chunks && resp.chunks.length > 0) {
+                    showDocPreview(resp.chunks);
+                }
+                setTimeout(closeDocImportModal, 1500);
+            } else {
+                document.getElementById('docProgressText').textContent = '导入失败：' + xhr.responseText;
+            }
+            document.getElementById('btnDocImport').disabled = false;
+        });
+        xhr.addEventListener('error', () => {
+            document.getElementById('docProgressText').textContent = '网络错误，请重试';
+            document.getElementById('btnDocImport').disabled = false;
+        });
+        xhr.open('POST', '${pageContext.request.contextPath}/api/document/import');
+        xhr.send(fd);
+    }
+
+    function showDocPreview(chunks) {
+        const area = document.getElementById('docPreviewArea');
+        area.style.display = 'block';
+        area.innerHTML = '<div style="font-size:13px;font-weight:600;margin-bottom:8px;">分块预览（' + chunks.length + ' 块）</div>';
+        chunks.forEach((c, i) => {
+            const div = document.createElement('div');
+            div.className = 'preview-item';
+            div.textContent = (i+1) + '. ' + c.substring(0, 120) + (c.length > 120 ? '...' : '');
+            area.appendChild(div);
+        });
+    }
+    </script>
+
+</body>
+</html>
